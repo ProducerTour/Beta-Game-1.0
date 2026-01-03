@@ -1,0 +1,182 @@
+// Grass Instance Data Generation Compute Shader
+// Based on Ghost of Tsushima GDC talk
+#pragma kernel GenerateGrass
+#pragma kernel CullGrass
+
+// Grass blade data structure
+struct GrassData
+{
+    float3 position;
+    float height;
+    float3 normal;
+    float rotation;
+    float bend;
+    float2 wind;
+    uint lodLevel;
+};
+
+// Buffers
+RWStructuredBuffer<GrassData> _GrassDataBuffer;
+AppendStructuredBuffer<GrassData> _VisibleGrassBuffer;
+
+// Parameters
+float3 _ChunkPosition;
+float2 _ChunkSize;
+int _GrassPerMeter;
+int _Seed;
+float _Time;
+float3 _CameraPosition;
+float _MaxDistance;
+float _DensityFalloff;
+
+// Wind parameters
+float2 _WindDirection;
+float _WindStrength;
+float _WindFrequency;
+
+// Terrain sampling (would be replaced with actual terrain height sampling)
+float _TerrainHeightScale;
+
+// Hash function for pseudo-random numbers
+uint Hash(uint state)
+{
+    state ^= 2747636419u;
+    state *= 2654435769u;
+    state ^= state >> 16;
+    state *= 2654435769u;
+    state ^= state >> 16;
+    state *= 2654435769u;
+    return state;
+}
+
+float HashToFloat(uint hash)
+{
+    return float(hash) / 4294967295.0;
+}
+
+// Simple noise function
+float Noise2D(float2 p)
+{
+    float2 i = floor(p);
+    float2 f = frac(p);
+
+    // Smoothstep
+    f = f * f * (3.0 - 2.0 * f);
+
+    float a = HashToFloat(Hash(uint(i.x) + Hash(uint(i.y) * 57u)));
+    float b = HashToFloat(Hash(uint(i.x + 1) + Hash(uint(i.y) * 57u)));
+    float c = HashToFloat(Hash(uint(i.x) + Hash(uint(i.y + 1) * 57u)));
+    float d = HashToFloat(Hash(uint(i.x + 1) + Hash(uint(i.y + 1) * 57u)));
+
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+}
+
+// Perlin-like noise
+float PerlinNoise(float2 p)
+{
+    float total = 0.0;
+    float frequency = 1.0;
+    float amplitude = 1.0;
+    float maxValue = 0.0;
+
+    for (int i = 0; i < 4; i++)
+    {
+        total += Noise2D(p * frequency) * amplitude;
+        maxValue += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+
+    return total / maxValue;
+}
+
+[numthreads(8, 8, 1)]
+void GenerateGrass(uint3 id : SV_DispatchThreadID)
+{
+    int grassCountX = (int)(_ChunkSize.x * _GrassPerMeter);
+    int grassCountZ = (int)(_ChunkSize.y * _GrassPerMeter);
+
+    if (id.x >= (uint)grassCountX || id.y >= (uint)grassCountZ)
+        return;
+
+    uint index = id.x + id.y * grassCountX;
+
+    // Base position on grid
+    float spacing = 1.0 / _GrassPerMeter;
+    float2 basePos = float2(id.x, id.y) * spacing;
+
+    // Jittered offset (Ghost of Tsushima style)
+    uint hash1 = Hash(index + _Seed);
+    uint hash2 = Hash(hash1);
+    float2 jitter = float2(HashToFloat(hash1), HashToFloat(hash2)) * spacing * 0.8;
+
+    float3 worldPos;
+    worldPos.x = _ChunkPosition.x + basePos.x + jitter.x;
+    worldPos.z = _ChunkPosition.z + basePos.y + jitter.y;
+
+    // Sample terrain height (simplified - would use actual terrain)
+    float terrainNoise = PerlinNoise(worldPos.xz * 0.01) * _TerrainHeightScale;
+    worldPos.y = terrainNoise;
+
+    // Calculate terrain normal
+    float delta = 0.5;
+    float hL = PerlinNoise(float2(worldPos.x - delta, worldPos.z) * 0.01) * _TerrainHeightScale;
+    float hR = PerlinNoise(float2(worldPos.x + delta, worldPos.z) * 0.01) * _TerrainHeightScale;
+    float hD = PerlinNoise(float2(worldPos.x, worldPos.z - delta) * 0.01) * _TerrainHeightScale;
+    float hU = PerlinNoise(float2(worldPos.x, worldPos.z + delta) * 0.01) * _TerrainHeightScale;
+    float3 normal = normalize(float3(hL - hR, 2.0 * delta, hD - hU));
+
+    // Random grass properties
+    uint hash3 = Hash(hash2);
+    uint hash4 = Hash(hash3);
+    uint hash5 = Hash(hash4);
+
+    float rotation = HashToFloat(hash3) * 6.28318; // 0 to 2PI
+    float height = 0.3 + HashToFloat(hash4) * 0.4; // 0.3 to 0.7 meters
+    float bend = HashToFloat(hash5) * 0.3; // Curve amount
+
+    // Wind effect (scrolling noise)
+    float2 windSamplePos = worldPos.xz * _WindFrequency + _WindDirection * _Time;
+    float windNoise = PerlinNoise(windSamplePos);
+    float2 wind = _WindDirection * windNoise * _WindStrength;
+
+    // Determine LOD based on distance
+    float dist = distance(worldPos, _CameraPosition);
+    uint lod = 0;
+    if (dist > _MaxDistance * 0.7) lod = 2;
+    else if (dist > _MaxDistance * 0.4) lod = 1;
+
+    // Write grass data
+    GrassData grass;
+    grass.position = worldPos;
+    grass.height = height;
+    grass.normal = normal;
+    grass.rotation = rotation;
+    grass.bend = bend;
+    grass.wind = wind;
+    grass.lodLevel = lod;
+
+    _GrassDataBuffer[index] = grass;
+}
+
+[numthreads(64, 1, 1)]
+void CullGrass(uint3 id : SV_DispatchThreadID)
+{
+    GrassData grass = _GrassDataBuffer[id.x];
+
+    float dist = distance(grass.position, _CameraPosition);
+
+    // Distance culling
+    if (dist > _MaxDistance)
+        return;
+
+    // Density falloff with distance
+    float densityThreshold = saturate(dist / _MaxDistance) * _DensityFalloff;
+    uint hash = Hash(id.x + 12345u);
+    if (HashToFloat(hash) < densityThreshold)
+        return;
+
+    // Frustum culling could be added here
+
+    _VisibleGrassBuffer.Append(grass);
+}

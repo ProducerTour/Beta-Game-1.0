@@ -1,0 +1,37 @@
+BIOME TERRAIN TEXTURE SETUP
+===========================
+
+Download textures from AmbientCG (free CC0 PBR textures):
+
+SAND (Beach/Desert):
+  URL: https://ambientcg.com/view?id=Ground061
+  Download: 2K JPG recommended
+  Extract to: Sand/
+  Files needed:
+    - Ground061_2K-JPG_Color.jpg     -> rename to Sand_Albedo.jpg
+    - Ground061_2K-JPG_NormalGL.jpg  -> rename to Sand_Normal.jpg
+    - Ground061_2K-JPG_Roughness.jpg -> rename to Sand_Roughness.jpg
+
+GRASS (Optional - can use tint color):
+  URL: https://ambientcg.com/view?id=Ground037
+  Download: 2K JPG
+  Extract to: Grass/
+
+ROCK (Mountains):
+  URL: https://ambientcg.com/view?id=Rock051
+  Download: 2K JPG
+  Extract to: Rock/
+
+SNOW (Optional):
+  URL: https://ambientcg.com/view?id=Snow006
+  Download: 2K JPG
+  Extract to: Snow/
+
+SETUP IN UNITY:
+1. Import textures into respective folders
+2. Select normal maps and set "Texture Type" to "Normal map" in Inspector
+3. Add BiomeTerrainSetup component to your ChunkManager GameObject
+4. Drag textures into the slots
+5. Right-click component -> "Generate Terrain Material"
+6. Right-click component -> "Apply Material to ChunkManager"
+7. Play to see textured terrain!

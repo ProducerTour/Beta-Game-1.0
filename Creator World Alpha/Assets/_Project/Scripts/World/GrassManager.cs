@@ -39,6 +39,10 @@ namespace CreatorWorld.World
         private ComputeBuffer lod1VertexBuffer;
         private ComputeBuffer lod2VertexBuffer;
 
+        // Dummy buffer to prevent Metal errors when no grass is rendering
+        // Metal requires all StructuredBuffers to be bound, even in editor preview
+        private ComputeBuffer dummyBuffer;
+
         // Material property block
         private MaterialPropertyBlock materialPropertyBlock;
 
@@ -134,6 +138,17 @@ namespace CreatorWorld.World
                 runtimeMaxViewDistance = settings.maxViewDistance;
                 runtimeCastShadows = settings.castShadows;
             }
+
+            // Create dummy buffer to prevent Metal errors
+            // Metal requires StructuredBuffer to always be bound, even in editor/preview
+            dummyBuffer = new ComputeBuffer(1, GrassInstance.Size);
+            dummyBuffer.SetData(new GrassInstance[1]);
+
+            // Immediately bind to material so Metal never sees an unbound buffer
+            if (grassMaterial != null)
+            {
+                grassMaterial.SetBuffer(TransformBufferID, dummyBuffer);
+            }
         }
 
         private void Start()
@@ -163,6 +178,10 @@ namespace CreatorWorld.World
             lod0VertexBuffer?.Release();
             lod1VertexBuffer?.Release();
             lod2VertexBuffer?.Release();
+
+            // Release dummy buffer
+            dummyBuffer?.Release();
+            dummyBuffer = null;
         }
 
         private void Update()

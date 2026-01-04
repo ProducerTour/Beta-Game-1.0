@@ -14,6 +14,7 @@ Shader "CreatorWorld/GrassInstanced"
         _TaperPower ("Taper Sharpness", Range(1, 4)) = 2.5
         _BladeCurve ("Blade Curve", Range(0, 0.5)) = 0.15
         _BladeWidth ("Blade Width Multiplier", Range(0.5, 2)) = 1.0
+        _ViewThickness ("View Thickness (GoT)", Range(0, 0.1)) = 0.03
 
         [Header(Wind)]
         _WindStrength ("Wind Strength", Range(0, 2)) = 0.6
@@ -30,6 +31,8 @@ Shader "CreatorWorld/GrassInstanced"
         _TranslucencyPower ("Translucency Power", Range(1, 10)) = 3
         _SpecularStrength ("Specular Strength", Range(0, 1)) = 0.15
         _SpecularPower ("Specular Power", Range(1, 64)) = 16
+        _NormalRoundness ("Normal Roundness", Range(0, 1)) = 0.5
+        _DensityAO ("Density AO Strength", Range(0, 1)) = 0.3
         _MinBrightness ("Min Brightness", Range(0, 1)) = 0.25
         _ShadowBrightness ("Shadow Brightness", Range(0, 1)) = 0.3
 
@@ -93,6 +96,7 @@ Shader "CreatorWorld/GrassInstanced"
                 float fadeAlpha : TEXCOORD5;
                 float density : TEXCOORD6;
                 float colorVar : TEXCOORD7;
+                float3 bladeUp : TEXCOORD8;
             };
 
             StructuredBuffer<GrassData> _TransformBuffer;
@@ -107,6 +111,7 @@ Shader "CreatorWorld/GrassInstanced"
                 float _TaperPower;
                 float _BladeCurve;
                 float _BladeWidth;
+                float _ViewThickness;
                 float _WindStrength;
                 float _WindSpeed;
                 float _WindNoiseScale;
@@ -119,6 +124,8 @@ Shader "CreatorWorld/GrassInstanced"
                 float _TranslucencyPower;
                 float _SpecularStrength;
                 float _SpecularPower;
+                float _NormalRoundness;
+                float _DensityAO;
                 float _MinBrightness;
                 float _ShadowBrightness;
                 float _MaxViewDistance;
@@ -192,13 +199,10 @@ Shader "CreatorWorld/GrassInstanced"
                 float bladeHash = hash21(instancePos.xz);
 
                 // === PROCEDURAL BLADE TAPERING ===
-                // Get height gradient from mesh (Y position normalized 0-1)
-                float heightGradient = saturate(input.positionOS.y);
+                // Use UV.y (0-1) instead of positionOS.y (0-0.6) for proper tapering
+                float heightGradient = input.uv.y;
 
-                // Taper: Shrink width towards tip using power curve for pointed look
-                // Higher _TaperPower = sharper point (more width retained until near tip)
-                // At base (y=0): taper = 1.0 (full width)
-                // At tip (y=1): taper approaches 0 for sharp point
+                // Taper: Shrink width towards tip
                 float taperCurve = 1.0 - pow(heightGradient, _TaperPower) * _TaperAmount;
 
                 // Apply taper to X position (width)
@@ -207,8 +211,7 @@ Shader "CreatorWorld/GrassInstanced"
                 shapedPos.z *= taperCurve * _BladeWidth;
 
                 // Add natural curve to the blade (S-curve bend)
-                // Per-blade curve direction for variety
-                float curveDir = (bladeHash - 0.5) * 2.0; // -1 to 1
+                float curveDir = (bladeHash - 0.5) * 2.0;
                 float curveFactor = sin(heightGradient * 3.14159) * _BladeCurve * curveDir;
                 shapedPos.x += curveFactor * heightGradient;
 
@@ -219,16 +222,14 @@ Shader "CreatorWorld/GrassInstanced"
                 // Apply instance transform to shaped position
                 float4 positionWS = mul(instanceMatrix, float4(shapedPos, 1.0));
 
+                // Store blade up direction for lighting
+                float3x3 normalMatrix = (float3x3)instanceMatrix;
+                float3 bladeUp = normalize(mul(normalMatrix, float3(0, 1, 0)));
+                output.bladeUp = bladeUp;
+
                 output.heightGradient = heightGradient;
                 output.density = density;
                 output.colorVar = bladeHash;
-
-                // Get instance scale
-                float3 scale = float3(
-                    length(instanceMatrix._m00_m10_m20),
-                    length(instanceMatrix._m01_m11_m21),
-                    length(instanceMatrix._m02_m12_m22)
-                );
 
                 // Wind animation (LOD0 gets full animation, others simplified)
                 float windMultiplier = _LODIndex == 0 ? 1.0 : (_LODIndex == 1 ? 0.5 : 0.0);
@@ -268,7 +269,7 @@ Shader "CreatorWorld/GrassInstanced"
                     // Apply wind displacement
                     positionWS.xz += totalWind * windDir;
 
-                    // Perpendicular sway for more natural motion
+                    // Perpendicular sway
                     float2 perpDir = float2(-windDir.y, windDir.x);
                     float perpSway = sin(time * 1.5 + bladeHash * 4.0) * 0.3 * deformCurve * windMultiplier;
                     positionWS.xz += perpSway * perpDir * _WindStrength;
@@ -277,12 +278,34 @@ Shader "CreatorWorld/GrassInstanced"
                     positionWS.y -= abs(totalWind) * 0.1;
                 }
 
-                // Transform normal (adjusted for tapered shape)
-                float3 adjustedNormal = input.normalOS;
-                // Normals should point more outward at base, more up at tip
-                adjustedNormal = lerp(adjustedNormal, float3(0, 1, 0), heightGradient * 0.5);
-                float3x3 normalMatrix = (float3x3)instanceMatrix;
-                float3 normalWS = normalize(mul(normalMatrix, adjustedNormal));
+                // === GHOST OF TSUSHIMA TRICK: VIEW-SPACE THICKENING ===
+                // Blades expand perpendicular to view when seen edge-on
+                float3 viewDir = normalize(_CameraPosition - positionWS.xyz);
+                float3 bladeNormal = normalize(mul(normalMatrix, input.normalOS));
+
+                // How much are we viewing edge-on? (0 = facing camera, 1 = edge-on)
+                float edgeFactor = 1.0 - abs(dot(viewDir, bladeNormal));
+                edgeFactor = saturate(edgeFactor);
+
+                // Calculate view-perpendicular direction
+                float3 viewRight = normalize(cross(viewDir, float3(0, 1, 0)));
+
+                // Expand in view space based on edge factor and height
+                float thicknessExpand = edgeFactor * _ViewThickness * heightGradient;
+                float side = sign(input.positionOS.x); // Which side of blade
+                positionWS.xyz += viewRight * thicknessExpand * side;
+
+                // === ROUNDED NORMALS for better specular ===
+                // Blend between flat normal and rounded (cylindrical) normal
+                float3 flatNormal = bladeNormal;
+                // Create a rounded normal that curves around the blade
+                float3 sideDir = normalize(cross(bladeUp, viewDir));
+                float normalCurve = input.positionOS.x * 10.0; // X position determines curve
+                float3 roundedNormal = normalize(lerp(flatNormal, sideDir * normalCurve + bladeUp * 0.5, _NormalRoundness));
+                // Blend more to up at tip for better light catch
+                roundedNormal = normalize(lerp(roundedNormal, bladeUp, heightGradient * 0.3));
+
+                output.normalWS = roundedNormal;
 
                 // Distance fade
                 float distance = length(positionWS.xyz - _CameraPosition);
@@ -296,7 +319,6 @@ Shader "CreatorWorld/GrassInstanced"
 
                 output.positionWS = positionWS.xyz;
                 output.positionCS = TransformWorldToHClip(positionWS.xyz);
-                output.normalWS = normalWS;
                 output.uv = input.uv;
                 output.fogFactor = ComputeFogFactor(output.positionCS.z);
 
@@ -309,23 +331,28 @@ Shader "CreatorWorld/GrassInstanced"
                 clip(input.fadeAlpha - 0.01);
 
                 // === Color Calculation ===
-                // AO at base fades quickly
-                float aoFactor = saturate(input.heightGradient * 5.0);
-                aoFactor = smoothstep(0.0, 1.0, aoFactor);
+                // Height-based AO (darker at base)
+                float heightAO = saturate(input.heightGradient * 4.0);
+                heightAO = smoothstep(0.0, 1.0, heightAO);
+
+                // === GHOST OF TSUSHIMA: DENSITY-BASED AO ===
+                // Denser grass = darker at base (light blocked)
+                float densityAO = lerp(1.0, 1.0 - _DensityAO, input.density);
+                float combinedAO = heightAO * densityAO;
 
                 // Base to tip gradient with smooth curve
                 float tipBlend = smoothstep(0.0, 1.0, input.heightGradient);
                 float3 baseToTip = lerp(_BaseColor.rgb, _TipColor.rgb, tipBlend);
 
-                // Apply AO at base
-                float3 grassColor = lerp(_AOColor.rgb, baseToTip, aoFactor);
+                // Apply combined AO at base
+                float3 grassColor = lerp(_AOColor.rgb, baseToTip, combinedAO);
 
                 // Per-blade color variation
                 float3 dryTint = lerp(grassColor, _DryColor.rgb * grassColor, input.colorVar * _ColorVariation);
                 grassColor = lerp(grassColor, dryTint, step(0.5, input.colorVar) * _ColorVariation * 2.0);
 
-                // Density-based variation
-                grassColor *= lerp(0.85, 1.15, input.density);
+                // Density-based brightness variation (denser = slightly darker overall)
+                grassColor *= lerp(1.0, 0.9, input.density * 0.5);
 
                 // === Lighting ===
                 Light mainLight = GetMainLight();
@@ -344,10 +371,20 @@ Shader "CreatorWorld/GrassInstanced"
                 float translucency = pow(VdotL, _TranslucencyPower) * _Translucency;
                 float3 sssColor = mainLight.color * translucency * _TipColor.rgb * input.heightGradient;
 
-                // === Specular Highlight ===
+                // === GHOST OF TSUSHIMA: SPECULAR ALONG BLADE ===
+                // Specular highlight that travels along the blade
                 float3 halfDir = normalize(lightDir + viewDir);
+
+                // Use blade up direction for anisotropic-like specular
+                float3 bladeDir = normalize(input.bladeUp);
                 float NdotH = saturate(dot(normal, halfDir));
-                float specular = pow(NdotH, _SpecularPower) * _SpecularStrength * input.heightGradient;
+                float BdotH = dot(bladeDir, halfDir);
+
+                // Anisotropic specular approximation
+                float specAniso = exp(-BdotH * BdotH * 10.0);
+                float specular = pow(NdotH, _SpecularPower) * _SpecularStrength;
+                specular *= lerp(1.0, specAniso, 0.5); // Blend anisotropic
+                specular *= input.heightGradient; // Stronger at tip
                 float3 specularColor = mainLight.color * specular;
 
                 // Ambient
@@ -408,6 +445,7 @@ Shader "CreatorWorld/GrassInstanced"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                float2 uv : TEXCOORD0;
                 uint instanceID : SV_InstanceID;
             };
 
@@ -446,12 +484,11 @@ Shader "CreatorWorld/GrassInstanced"
                 GrassData instanceData = _TransformBuffer[input.instanceID];
                 float4x4 instanceMatrix = instanceData.trs;
 
-                // Extract instance position for variation
                 float3 instancePos = float3(instanceMatrix._m03, instanceMatrix._m13, instanceMatrix._m23);
                 float bladeHash = hash21(instancePos.xz);
 
-                // Apply same tapering as main pass
-                float heightGradient = saturate(input.positionOS.y);
+                // Use UV.y (0-1) for proper tapering
+                float heightGradient = input.uv.y;
                 float taperCurve = 1.0 - pow(heightGradient, _TaperPower) * _TaperAmount;
 
                 float3 shapedPos = input.positionOS.xyz;
@@ -505,6 +542,7 @@ Shader "CreatorWorld/GrassInstanced"
             struct Attributes
             {
                 float4 positionOS : POSITION;
+                float2 uv : TEXCOORD0;
                 uint instanceID : SV_InstanceID;
             };
 
@@ -514,6 +552,7 @@ Shader "CreatorWorld/GrassInstanced"
             };
 
             StructuredBuffer<GrassData> _TransformBuffer;
+
             float _TaperAmount;
             float _TaperPower;
             float _BladeCurve;
@@ -533,12 +572,11 @@ Shader "CreatorWorld/GrassInstanced"
                 GrassData instanceData = _TransformBuffer[input.instanceID];
                 float4x4 instanceMatrix = instanceData.trs;
 
-                // Extract instance position for variation
                 float3 instancePos = float3(instanceMatrix._m03, instanceMatrix._m13, instanceMatrix._m23);
                 float bladeHash = hash21(instancePos.xz);
 
-                // Apply same tapering as main pass
-                float heightGradient = saturate(input.positionOS.y);
+                // Use UV.y (0-1) for proper tapering
+                float heightGradient = input.uv.y;
                 float taperCurve = 1.0 - pow(heightGradient, _TaperPower) * _TaperAmount;
 
                 float3 shapedPos = input.positionOS.xyz;
@@ -564,5 +602,5 @@ Shader "CreatorWorld/GrassInstanced"
         }
     }
 
-    FallBack "Hidden/Universal Render Pipeline/FallbackError"
+    FallBack Off
 }

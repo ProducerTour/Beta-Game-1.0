@@ -22,7 +22,7 @@ namespace CreatorWorld.Player
         [SerializeField] private MovementConfig config;
 
         [Header("Spawn Settings")]
-        [SerializeField] private Vector3 spawnPosition = new Vector3(1024f, 50f, 256f);
+        [SerializeField] private Vector3 spawnPosition = new Vector3(1024f, 3.236518f, 256f);
         [SerializeField] private bool useSpawnPosition = true;
 
         // Components

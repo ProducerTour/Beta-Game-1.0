@@ -10,7 +10,8 @@ Shader "CreatorWorld/GrassInstanced"
         _ColorVariation ("Color Variation", Range(0, 0.5)) = 0.15
 
         [Header(Blade Shape)]
-        _TaperAmount ("Taper Amount", Range(0, 1)) = 0.9
+        _TaperAmount ("Taper Amount", Range(0, 1)) = 0.98
+        _TaperPower ("Taper Sharpness", Range(1, 4)) = 2.5
         _BladeCurve ("Blade Curve", Range(0, 0.5)) = 0.15
         _BladeWidth ("Blade Width Multiplier", Range(0.5, 2)) = 1.0
 
@@ -103,6 +104,7 @@ Shader "CreatorWorld/GrassInstanced"
                 float4 _DryColor;
                 float _ColorVariation;
                 float _TaperAmount;
+                float _TaperPower;
                 float _BladeCurve;
                 float _BladeWidth;
                 float _WindStrength;
@@ -193,10 +195,11 @@ Shader "CreatorWorld/GrassInstanced"
                 // Get height gradient from mesh (Y position normalized 0-1)
                 float heightGradient = saturate(input.positionOS.y);
 
-                // Taper: Shrink width towards tip using power curve for natural look
+                // Taper: Shrink width towards tip using power curve for pointed look
+                // Higher _TaperPower = sharper point (more width retained until near tip)
                 // At base (y=0): taper = 1.0 (full width)
-                // At tip (y=1): taper = 1.0 - _TaperAmount (very thin)
-                float taperCurve = 1.0 - pow(heightGradient, 1.5) * _TaperAmount;
+                // At tip (y=1): taper approaches 0 for sharp point
+                float taperCurve = 1.0 - pow(heightGradient, _TaperPower) * _TaperAmount;
 
                 // Apply taper to X position (width)
                 float3 shapedPos = input.positionOS.xyz;
@@ -418,6 +421,7 @@ Shader "CreatorWorld/GrassInstanced"
             float3 _LightDirection;
             int _LODIndex;
             float _TaperAmount;
+            float _TaperPower;
             float _BladeCurve;
             float _BladeWidth;
 
@@ -448,7 +452,7 @@ Shader "CreatorWorld/GrassInstanced"
 
                 // Apply same tapering as main pass
                 float heightGradient = saturate(input.positionOS.y);
-                float taperCurve = 1.0 - pow(heightGradient, 1.5) * _TaperAmount;
+                float taperCurve = 1.0 - pow(heightGradient, _TaperPower) * _TaperAmount;
 
                 float3 shapedPos = input.positionOS.xyz;
                 shapedPos.x *= taperCurve * _BladeWidth;
@@ -511,6 +515,7 @@ Shader "CreatorWorld/GrassInstanced"
 
             StructuredBuffer<GrassData> _TransformBuffer;
             float _TaperAmount;
+            float _TaperPower;
             float _BladeCurve;
             float _BladeWidth;
 
@@ -534,7 +539,7 @@ Shader "CreatorWorld/GrassInstanced"
 
                 // Apply same tapering as main pass
                 float heightGradient = saturate(input.positionOS.y);
-                float taperCurve = 1.0 - pow(heightGradient, 1.5) * _TaperAmount;
+                float taperCurve = 1.0 - pow(heightGradient, _TaperPower) * _TaperAmount;
 
                 float3 shapedPos = input.positionOS.xyz;
                 shapedPos.x *= taperCurve * _BladeWidth;

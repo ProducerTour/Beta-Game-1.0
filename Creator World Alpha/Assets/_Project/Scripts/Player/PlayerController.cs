@@ -21,6 +21,10 @@ namespace CreatorWorld.Player
         [Header("Configuration")]
         [SerializeField] private MovementConfig config;
 
+        [Header("Spawn Settings")]
+        [SerializeField] private Vector3 spawnPosition = new Vector3(1024f, 50f, 256f);
+        [SerializeField] private bool useSpawnPosition = true;
+
         // Components
         private CharacterController controller;
         private GroundChecker groundChecker;
@@ -77,11 +81,43 @@ namespace CreatorWorld.Player
 
         private void Start()
         {
+            // Teleport to spawn position if enabled
+            if (useSpawnPosition)
+            {
+                TeleportToSpawn();
+            }
+
             // Set game to playing state if GameManager exists
             var gameState = ServiceLocator.Get<IGameStateService>();
             if (gameState != null)
             {
                 gameState.SetGameState(Interfaces.GameState.Playing);
+            }
+        }
+
+        /// <summary>
+        /// Teleport player to the configured spawn position
+        /// </summary>
+        public void TeleportToSpawn()
+        {
+            TeleportTo(spawnPosition);
+        }
+
+        /// <summary>
+        /// Teleport player to a specific world position
+        /// </summary>
+        public void TeleportTo(Vector3 position)
+        {
+            // Disable CharacterController to allow position change
+            if (controller != null)
+            {
+                controller.enabled = false;
+                transform.position = position;
+                controller.enabled = true;
+            }
+            else
+            {
+                transform.position = position;
             }
         }
 

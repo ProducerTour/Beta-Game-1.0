@@ -33,7 +33,6 @@ namespace CreatorWorld.Player
         [SerializeField] private float currentStamina = 100f;
         [SerializeField] private float staminaRegenRate = 15f;
         [SerializeField] private float sprintStaminaCost = 10f; // per second
-        [SerializeField] private float jumpStaminaCost = 15f;
 
         // State
         private float lastDamageTime;

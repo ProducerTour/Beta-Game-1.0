@@ -12,7 +12,6 @@ namespace CreatorWorld.World
         [Header("River Rendering")]
         [SerializeField] private Material riverMaterial;
         [SerializeField] private float waterSurfaceOffset = 0.1f;
-        [SerializeField] private int segmentsPerPoint = 2;
 
         [Header("References")]
         [SerializeField] private RiverGenerator riverGenerator;

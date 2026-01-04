@@ -1,33 +1,69 @@
 using UnityEngine;
+using CreatorWorld.Config;
 
 namespace CreatorWorld.World
 {
     /// <summary>
     /// Static terrain generation utilities using layered noise.
     /// Generates Rust-style terrain with beaches, grasslands, mountains.
+    /// Call Initialize() with BiomeSettings before use.
     /// </summary>
     public static class TerrainGenerator
     {
-        // Noise settings
-        private const float BaseScale = 0.005f;
-        private const float DetailScale = 0.02f;
-        private const float MountainScale = 0.002f;
-        private const float RidgeScale = 0.008f;
+        // Settings reference (set via Initialize)
+        private static BiomeSettings _settings;
 
-        // Height settings
-        private const float BaseAmplitude = 30f;
-        private const float DetailAmplitude = 5f;
-        private const float MountainAmplitude = 100f;
-        private const float RidgeAmplitude = 40f;
+        /// <summary>
+        /// Current biome settings. Returns default values if not initialized.
+        /// </summary>
+        public static BiomeSettings Settings
+        {
+            get
+            {
+                if (_settings == null)
+                {
+                    Debug.LogWarning("TerrainGenerator not initialized! Using default values.");
+                    return null;
+                }
+                return _settings;
+            }
+        }
 
-        // Water level
-        public const float WaterLevel = 0f;
+        /// <summary>
+        /// Initialize the terrain generator with biome settings.
+        /// Must be called before generating terrain.
+        /// </summary>
+        public static void Initialize(BiomeSettings settings)
+        {
+            _settings = settings;
+            if (_settings != null)
+            {
+                Debug.Log($"TerrainGenerator initialized with settings: {settings.name}");
+            }
+            else
+            {
+                Debug.LogError("TerrainGenerator initialized with null settings!");
+            }
+        }
+
+        /// <summary>
+        /// Check if terrain generator has been initialized
+        /// </summary>
+        public static bool IsInitialized => _settings != null;
+
+        // Public accessors for commonly used values (for external code compatibility)
+        public static float WaterLevel => _settings != null ? _settings.WaterLevel : 0f;
+        public static float MapSize => _settings != null ? _settings.MapSize : 2048f;
+        public static float MapCenterX => _settings != null ? _settings.MapCenterX : 1024f;
+        public static float MapCenterZ => _settings != null ? _settings.MapCenterZ : 1024f;
 
         /// <summary>
         /// Get terrain height at world position (base terrain only, no rivers)
         /// </summary>
         public static float GetHeightAt(float x, float z, int seed)
         {
+            if (_settings == null) return 0f;
+
             float height = 0f;
 
             // Seed offset for variation
@@ -35,20 +71,26 @@ namespace CreatorWorld.World
             float seedOffsetZ = seed * 0.13f;
 
             // Base terrain (large rolling hills)
-            height += SamplePerlin(x + seedOffsetX, z + seedOffsetZ, BaseScale) * BaseAmplitude;
+            height += SamplePerlin(x + seedOffsetX, z + seedOffsetZ, _settings.BaseScale) * _settings.BaseAmplitude;
 
             // Detail noise (small bumps)
-            height += SamplePerlin(x + seedOffsetX * 2, z + seedOffsetZ * 2, DetailScale) * DetailAmplitude;
+            height += SamplePerlin(x + seedOffsetX * 2, z + seedOffsetZ * 2, _settings.DetailScale) * _settings.DetailAmplitude;
 
             // Mountain regions (using domain warping)
             // More permissive mask for taller mountains (threshold 0.1, power 1.5, multiplier 4)
-            float mountainMask = SamplePerlin(x * MountainScale, z * MountainScale, 1f);
+            float mountainMask = SamplePerlin(x * _settings.MountainScale, z * _settings.MountainScale, 1f);
             mountainMask = Mathf.Pow(Mathf.Max(0, mountainMask - 0.1f), 1.5f) * 4f;
-            height += mountainMask * MountainAmplitude;
+            height += mountainMask * _settings.MountainAmplitude;
 
             // Ridge noise for dramatic peaks
-            float ridge = RidgeNoise(x + seedOffsetX, z + seedOffsetZ, RidgeScale);
-            height += ridge * RidgeAmplitude * mountainMask;
+            float ridge = RidgeNoise(x + seedOffsetX, z + seedOffsetZ, _settings.RidgeScale);
+            height += ridge * _settings.RidgeAmplitude * mountainMask;
+
+            // Apply height offset to raise terrain (more land above water)
+            height += _settings.HeightOffset;
+
+            // Apply island falloff (ocean at map edges)
+            height = ApplyIslandFalloff(x, z, height);
 
             // Flatten beaches near water level
             if (height < 5f && height > -2f)
@@ -58,6 +100,45 @@ namespace CreatorWorld.World
             }
 
             return height;
+        }
+
+        /// <summary>
+        /// Apply island falloff to create bounded island with ocean at edges.
+        /// Uses distance from map center with noise for natural coastline.
+        /// </summary>
+        private static float ApplyIslandFalloff(float x, float z, float height)
+        {
+            if (_settings == null) return height;
+
+            // Distance from map center
+            float dx = x - _settings.MapCenterX;
+            float dz = z - _settings.MapCenterZ;
+            float distFromCenter = Mathf.Sqrt(dx * dx + dz * dz);
+
+            // Add noise to break up the circular edge for natural coastline
+            float edgeNoise = SamplePerlin(x * 0.003f, z * 0.003f, 1f) * 100f;
+            float adjustedDist = distFromCenter + edgeNoise;
+
+            if (adjustedDist < _settings.IslandFalloffStart)
+            {
+                // Inside core island - no falloff
+                return height;
+            }
+            else if (adjustedDist > _settings.IslandFalloffEnd)
+            {
+                // Beyond edge - deep water
+                return _settings.WaterLevel - _settings.IslandFalloffDepth;
+            }
+            else
+            {
+                // In falloff zone - smooth transition to ocean
+                float t = Mathf.InverseLerp(_settings.IslandFalloffStart, _settings.IslandFalloffEnd, adjustedDist);
+                t = Mathf.SmoothStep(0f, 1f, t);
+
+                // Lerp from current height toward underwater
+                float targetHeight = _settings.WaterLevel - _settings.IslandFalloffDepth * t;
+                return Mathf.Lerp(height, targetHeight, t);
+            }
         }
 
         /// <summary>
@@ -91,110 +172,207 @@ namespace CreatorWorld.World
 
         /// <summary>
         /// Get biome weights for texture splatting (R=sand, G=dirt/grass, B=rock, A=snow)
-        /// Uses height-based blending with subtle noise for natural edge variation.
-        /// Also applies sand/gravel along riverbanks.
+        /// Uses LATITUDE (Z-axis) for biome zones plus altitude overrides.
+        /// South = Desert (sand), Center = Grasslands, North = Snow.
+        /// High altitude peaks get snow regardless of latitude.
         /// </summary>
         public static Color GetBiomeWeights(float x, float z, int seed)
         {
+            if (_settings == null) return new Color(0f, 1f, 0f, 0f); // Default to grass
+
             float height = GetHeightAt(x, z, seed);
 
-            // Subtle noise for natural edge variation (smaller scale = smoother transitions)
+            // Subtle noise for natural edge variation
             float noise = Mathf.PerlinNoise(x * 0.008f + seed * 0.1f, z * 0.008f + seed * 0.13f);
             float noiseVariation = (noise - 0.5f) * 2f; // -1 to 1 range
 
             float sandWeight = 0f;
-            float dirtWeight = 0f;  // This is the "grass" channel - now used for dirt
+            float grassWeight = 0f;  // G channel - supports procedural grass
             float rockWeight = 0f;
             float snowWeight = 0f;
 
-            // Check for river proximity (riverbanks get sand/gravel)
-            float riverCarve = RiverGenerator.GetRiverCarveDepth(x, z);
-            float riverbankBlend = 0f;
-            if (riverCarve > 0.1f)
+            // ============ BEACH OVERRIDE ============
+            // Beaches at water level get sand regardless of latitude
+            if (height < _settings.WaterLevel + 1.5f)
             {
-                // In or near river - blend to sand/gravel
-                riverbankBlend = Mathf.Clamp01(riverCarve / 2f); // Full sand in river center
+                return ApplyRiverbankBlend(x, z, 1f, 0f, 0f, 0f);
             }
 
-            // Fixed height thresholds (noise only affects blend, not thresholds)
-            // Beach: 0-3m (right at water level)
-            // Transition: 3-8m (sand fades to dirt)
-            // Dirt/Grass zone: 8-70m (main playable area with procedural grass blades)
-            // Rock blend: 55-90m (dirt fades to rock)
-            // Snow blend: 90-130m (rock fades to snow)
-            // Pure snow: 130m+
-
-            if (height < 3f)
+            // ============ ALTITUDE SNOW OVERRIDE ============
+            // High mountains get snow regardless of latitude
+            float altitudeSnowFactor = 0f;
+            if (height > _settings.SnowAltitudeThreshold)
             {
-                // Pure beach/sand near water
-                sandWeight = 1f;
+                altitudeSnowFactor = Mathf.InverseLerp(_settings.SnowAltitudeThreshold, _settings.SnowAltitudeFullThreshold, height);
+                altitudeSnowFactor = Mathf.SmoothStep(0f, 1f, altitudeSnowFactor);
             }
-            else if (height < 8f)
+
+            // ============ LATITUDE-BASED BIOME CALCULATION ============
+            float desertFactor = 0f;    // Desert influence (south)
+            float grassFactor = 0f;     // Grassland influence (center)
+            float snowFactor = 0f;      // Snow influence (north) - from latitude
+
+            if (z < _settings.DesertZoneEnd)
             {
-                // Sand to dirt transition (tight band)
-                float t = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(3f, 8f, height));
-                // Add subtle noise to transition
+                // Pure desert zone (south)
+                desertFactor = 1f;
+            }
+            else if (z < _settings.DesertTransitionEnd)
+            {
+                // Desert-to-grass transition
+                float t = Mathf.InverseLerp(_settings.DesertZoneEnd, _settings.DesertTransitionEnd, z);
+                t = Mathf.SmoothStep(0f, 1f, t);
                 t = Mathf.Clamp01(t + noiseVariation * 0.15f);
-                sandWeight = 1f - t;
-                dirtWeight = t;
+                desertFactor = 1f - t;
+                grassFactor = t;
             }
-            else if (height < 55f)
+            else if (z < _settings.GrassZoneEnd)
             {
-                // Pure dirt zone (procedural grass grows here)
-                dirtWeight = 1f;
-
-                // Apply riverbank sand blend
-                if (riverbankBlend > 0f)
-                {
-                    sandWeight = riverbankBlend;
-                    dirtWeight = 1f - riverbankBlend;
-                }
+                // Pure grassland zone (center)
+                grassFactor = 1f;
             }
-            else if (height < 90f)
+            else if (z < _settings.GrassToSnowEnd)
             {
-                // Dirt to rock transition
-                float t = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(55f, 90f, height));
-                // Add noise for rocky outcrops
-                t = Mathf.Clamp01(t + noiseVariation * 0.2f);
-                dirtWeight = 1f - t;
-                rockWeight = t;
-            }
-            else if (height < 130f)
-            {
-                // Rock to snow transition
-                float t = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(90f, 130f, height));
-                t = Mathf.Clamp01(t + noiseVariation * 0.1f);
-                rockWeight = 1f - t;
-                snowWeight = t;
+                // Grass-to-snow transition
+                float t = Mathf.InverseLerp(_settings.GrassZoneEnd, _settings.GrassToSnowEnd, z);
+                t = Mathf.SmoothStep(0f, 1f, t);
+                t = Mathf.Clamp01(t + noiseVariation * 0.15f);
+                grassFactor = 1f - t;
+                snowFactor = t;
             }
             else
             {
-                // Pure snow peaks
-                snowWeight = 1f;
+                // Pure snow zone (north)
+                snowFactor = 1f;
             }
 
-            return new Color(sandWeight, dirtWeight, rockWeight, snowWeight);
+            // ============ COMBINE ALTITUDE SNOW WITH LATITUDE ============
+            // Altitude snow overrides latitude biomes
+            snowFactor = Mathf.Max(snowFactor, altitudeSnowFactor);
+
+            // Reduce other biomes proportionally when altitude snow kicks in
+            if (altitudeSnowFactor > 0f)
+            {
+                desertFactor *= (1f - altitudeSnowFactor);
+                grassFactor *= (1f - altitudeSnowFactor);
+            }
+
+            // ============ HEIGHT-BASED ROCK BLENDING ============
+            // Higher elevations blend to rock (before snow altitude)
+            float rockFromHeight = 0f;
+
+            if (height > _settings.RockBlendStart && height < _settings.SnowAltitudeThreshold)
+            {
+                rockFromHeight = Mathf.InverseLerp(_settings.RockBlendStart, _settings.RockBlendEnd, height);
+                rockFromHeight = Mathf.SmoothStep(0f, 1f, rockFromHeight);
+                rockFromHeight = Mathf.Clamp01(rockFromHeight + noiseVariation * 0.2f);
+            }
+
+            // ============ APPLY BIOME WEIGHTS ============
+
+            // DESERT: Sand + Rock (NO grass!)
+            if (desertFactor > 0f)
+            {
+                float desertRockFactor = Mathf.Clamp01(height / 30f); // More rock at higher desert elevations
+                desertRockFactor = Mathf.Max(desertRockFactor, rockFromHeight);
+
+                sandWeight += desertFactor * (1f - desertRockFactor);
+                rockWeight += desertFactor * desertRockFactor;
+            }
+
+            // GRASSLAND: Grass + Rock at height
+            if (grassFactor > 0f)
+            {
+                grassWeight += grassFactor * (1f - rockFromHeight);
+                rockWeight += grassFactor * rockFromHeight;
+            }
+
+            // SNOW: Snow + some rock at lower snow areas
+            if (snowFactor > 0f)
+            {
+                float snowRockFactor = 0f;
+                if (height < 40f)
+                {
+                    // Lower snow areas have more rock showing through
+                    snowRockFactor = Mathf.InverseLerp(40f, 20f, height) * 0.3f;
+                }
+                snowWeight += snowFactor * (1f - snowRockFactor);
+                rockWeight += snowFactor * snowRockFactor;
+            }
+
+            // ============ NORMALIZE WEIGHTS ============
+            float total = sandWeight + grassWeight + rockWeight + snowWeight;
+            if (total > 0.001f)
+            {
+                sandWeight /= total;
+                grassWeight /= total;
+                rockWeight /= total;
+                snowWeight /= total;
+            }
+
+            return ApplyRiverbankBlend(x, z, sandWeight, grassWeight, rockWeight, snowWeight);
         }
 
         /// <summary>
-        /// Get biome type at world position
+        /// Apply riverbank sand/gravel blending to biome weights
+        /// </summary>
+        private static Color ApplyRiverbankBlend(float x, float z, float sand, float grass, float rock, float snow)
+        {
+            float riverCarve = RiverGenerator.GetRiverCarveDepth(x, z);
+            if (riverCarve > 0.1f)
+            {
+                float riverbankBlend = Mathf.Clamp01(riverCarve / 2f);
+                // Blend toward sand on riverbanks
+                sand = Mathf.Lerp(sand, 1f, riverbankBlend);
+                grass *= (1f - riverbankBlend);
+                rock *= (1f - riverbankBlend);
+                snow *= (1f - riverbankBlend);
+
+                // Renormalize
+                float total = sand + grass + rock + snow;
+                if (total > 0.001f)
+                {
+                    sand /= total;
+                    grass /= total;
+                    rock /= total;
+                    snow /= total;
+                }
+            }
+
+            return new Color(sand, grass, rock, snow);
+        }
+
+        /// <summary>
+        /// Get biome type at world position (updated for latitude system)
         /// </summary>
         public static BiomeType GetBiomeAt(float x, float z, int seed)
         {
-            float height = GetHeightAt(x, z, seed);
-            float moisture = SamplePerlin(x * 0.003f, z * 0.003f, 1f);
+            if (_settings == null) return BiomeType.Grassland;
 
-            // Height-based biomes
-            if (height < WaterLevel) return BiomeType.Ocean;
+            float height = GetHeightAt(x, z, seed);
+
+            // Height-based overrides first
+            if (height < _settings.WaterLevel) return BiomeType.Ocean;
             if (height < 3f) return BiomeType.Beach;
-            if (height > 120f) return BiomeType.Snow;
+            if (height > _settings.SnowAltitudeFullThreshold) return BiomeType.Snow;
             if (height > 80f) return BiomeType.Mountain;
 
-            // Moisture-based biomes for mid elevations
-            if (moisture > 0.6f) return BiomeType.Forest;
-            if (moisture < 0.3f) return BiomeType.Desert;
+            // Latitude-based biomes (Z-axis)
+            if (z < _settings.DesertZoneEnd) return BiomeType.Desert;
+            if (z < _settings.DesertTransitionEnd)
+            {
+                // Transition zone - could be either
+                float t = Mathf.InverseLerp(_settings.DesertZoneEnd, _settings.DesertTransitionEnd, z);
+                return t < 0.5f ? BiomeType.Desert : BiomeType.Grassland;
+            }
+            if (z < _settings.GrassZoneEnd) return BiomeType.Grassland;
+            if (z < _settings.GrassToSnowEnd)
+            {
+                float t = Mathf.InverseLerp(_settings.GrassZoneEnd, _settings.GrassToSnowEnd, z);
+                return t < 0.5f ? BiomeType.Grassland : BiomeType.Snow;
+            }
 
-            return BiomeType.Grassland;
+            return BiomeType.Snow;
         }
 
         /// <summary>
@@ -270,7 +448,8 @@ namespace CreatorWorld.World
             if (height < 2f || height > 80f) return false;
             if (slope > 30f) return false;
 
-            // No trees on sand/beach (R channel) or snow (A channel)
+            // No trees on sand/beach/desert (R channel) or snow (A channel)
+            // Desert zones have high sand weight, so this catches them
             if (biomeWeights.r > 0.5f) return false;
             if (biomeWeights.a > 0.3f) return false;
 
@@ -363,6 +542,38 @@ namespace CreatorWorld.World
 
             // No rocks in rivers
             if (IsInRiver(x, z)) density = 0f;
+
+            return Mathf.Clamp01(density);
+        }
+
+        /// <summary>
+        /// Get grass blade density at position (0-1) for procedural grass spawning.
+        /// Used by GPU grass instancer for biome-aware placement.
+        /// </summary>
+        public static float GetGrassDensity(float x, float z, int seed)
+        {
+            if (_settings == null) return 0f;
+
+            Color biomeWeights = GetBiomeWeights(x, z, seed);
+            float slope = GetSlopeAt(x, z, seed);
+            float height = GetHeightAt(x, z, seed);
+
+            // Base density from grass biome weight
+            float density = biomeWeights.g;
+
+            // Add noise variation for natural clumping
+            float noise = (SamplePerlin(x * 0.1f, z * 0.1f, 1f) + 1f) * 0.5f;
+            density *= 0.5f + noise * 0.5f;
+
+            // Reduce on slopes (grass doesn't grow well on steep terrain)
+            density *= 1f - Mathf.Clamp01(slope / 35f);
+
+            // Exclusions
+            if (height < _settings.WaterLevel + 0.5f) density = 0f;  // No grass underwater/beaches
+            if (biomeWeights.r > 0.5f) density = 0f;       // No grass on sand
+            if (biomeWeights.b > 0.6f) density *= 0.2f;    // Less grass on rock
+            if (biomeWeights.a > 0.2f) density = 0f;       // No grass on snow
+            if (IsInRiver(x, z)) density = 0f;             // No grass in rivers
 
             return Mathf.Clamp01(density);
         }

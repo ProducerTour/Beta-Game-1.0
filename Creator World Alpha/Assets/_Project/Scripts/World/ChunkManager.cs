@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
+using CreatorWorld.Config;
+using CreatorWorld.UI;
 
 namespace CreatorWorld.World
 {
@@ -10,6 +12,7 @@ namespace CreatorWorld.World
     public class ChunkManager : MonoBehaviour
     {
         [Header("World Settings")]
+        [SerializeField] private BiomeSettings biomeSettings;
         [SerializeField] private int worldSeed = 12345;
         [SerializeField] private int chunkSize = 64; // meters
         [SerializeField] private int viewDistance = 3; // chunks in each direction
@@ -32,6 +35,9 @@ namespace CreatorWorld.World
         [SerializeField] private GameObject[] rockPrefabs; // Rock variations
         [SerializeField] private float rockYOffset = 0f; // Adjust if rocks float or sink
 
+        [Header("Grass")]
+        [SerializeField] private GrassManager grassManager;
+
         // Chunk storage
         private Dictionary<Vector2Int, Chunk> loadedChunks = new Dictionary<Vector2Int, Chunk>();
         private Queue<Vector2Int> loadQueue = new Queue<Vector2Int>();
@@ -41,12 +47,27 @@ namespace CreatorWorld.World
         private Vector2Int currentPlayerChunk;
         private Vector2Int lastPlayerChunk;
 
+        // Initial loading tracking
+        private int initialChunksRequired;
+        private int initialChunksLoaded;
+        private bool initialLoadComplete;
+
         public int WorldSeed => worldSeed;
         public int ChunkSize => chunkSize;
         public int ActiveChunkCount => loadedChunks.Count;
 
         private void Start()
         {
+            // Initialize terrain generator with biome settings
+            if (biomeSettings != null)
+            {
+                TerrainGenerator.Initialize(biomeSettings);
+            }
+            else
+            {
+                Debug.LogError("[ChunkManager] BiomeSettings not assigned! Create a BiomeSettings asset and assign it.");
+            }
+
             if (player == null)
             {
                 var playerController = FindFirstObjectByType<Player.PlayerController>();
@@ -66,6 +87,16 @@ namespace CreatorWorld.World
             // Initialize world
             Random.InitState(worldSeed);
             UpdatePlayerChunk();
+
+            // Calculate initial chunks needed (view distance grid)
+            int gridSize = (viewDistance * 2 + 1);
+            initialChunksRequired = gridSize * gridSize;
+            initialChunksLoaded = 0;
+            initialLoadComplete = false;
+
+            Debug.Log($"[ChunkManager] Starting initial load: {initialChunksRequired} chunks required");
+            GameLoadingScreen.SetStageProgress("terrain", 0f, "Preparing terrain...");
+
             QueueChunksAroundPlayer();
         }
 
@@ -193,15 +224,45 @@ namespace CreatorWorld.World
             chunkGO.transform.position = new Vector3(coord.x * chunkSize, 0, coord.y * chunkSize);
 
             Chunk chunk = chunkGO.AddComponent<Chunk>();
+
+            // Wire up grass generation when chunk is ready
+            if (grassManager != null)
+            {
+                chunk.OnChunkReady += grassManager.GenerateGrassForChunk;
+            }
+
             chunk.Initialize(coord, chunkSize, worldSeed, terrainMaterial, treePrefabs, treeYOffset, rockPrefabs, rockYOffset);
 
             loadedChunks[coord] = chunk;
+
+            // Track initial loading progress
+            if (!initialLoadComplete)
+            {
+                initialChunksLoaded++;
+                float progress = (float)initialChunksLoaded / initialChunksRequired;
+                GameLoadingScreen.SetStageProgress("terrain", progress, $"Loading chunk {initialChunksLoaded}/{initialChunksRequired}");
+
+                Debug.Log($"[ChunkManager] Loaded chunk {coord} ({initialChunksLoaded}/{initialChunksRequired})");
+
+                if (initialChunksLoaded >= initialChunksRequired)
+                {
+                    initialLoadComplete = true;
+                    GameLoadingScreen.FinishStage("terrain");
+                    Debug.Log("[ChunkManager] Initial terrain load complete!");
+                }
+            }
         }
 
         private void UnloadChunk(Vector2Int coord)
         {
             if (loadedChunks.TryGetValue(coord, out Chunk chunk))
             {
+                // Remove grass for this chunk
+                if (grassManager != null)
+                {
+                    grassManager.RemoveGrassForChunk(coord);
+                }
+
                 Destroy(chunk.gameObject);
                 loadedChunks.Remove(coord);
             }

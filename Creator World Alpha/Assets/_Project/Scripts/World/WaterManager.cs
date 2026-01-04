@@ -13,8 +13,6 @@ namespace CreatorWorld.World
         [SerializeField] private float waterSize = 2000f;
         [SerializeField] private Color shallowColor = new Color(0.2f, 0.6f, 0.8f, 0.9f);
         [SerializeField] private Color deepColor = new Color(0.05f, 0.2f, 0.4f, 0.95f);
-        [SerializeField] private float waveSpeed = 0.5f;
-        [SerializeField] private float waveScale = 0.1f;
 
         [Header("Follow Camera")]
         [SerializeField] private bool followCamera = true;

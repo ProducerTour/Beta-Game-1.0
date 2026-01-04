@@ -22,7 +22,6 @@ namespace CreatorWorld.Debugging
         [SerializeField] private bool showFPS = true;
         [SerializeField] private bool showPlayerStats = false;
         [SerializeField] private bool showInputDebug = false;
-        [SerializeField] private bool showGrassStats = false;
 
         // State
         private bool isPanelOpen;
@@ -38,7 +37,6 @@ namespace CreatorWorld.Debugging
         private PlayerController playerController;
         private MovementHandler movementHandler;
         private WeaponInventory weaponInventory;
-        private ProceduralGrassRenderer grassRenderer;
 
         // Panel dimensions
         private Rect panelRect = new Rect(10, 10, 250, 300);
@@ -52,7 +50,6 @@ namespace CreatorWorld.Debugging
             playerController = GetComponent<PlayerController>();
             movementHandler = GetComponent<MovementHandler>();
             weaponInventory = GetComponent<WeaponInventory>();
-            grassRenderer = FindFirstObjectByType<ProceduralGrassRenderer>();
 
             // Disable AnimationDebugger's own GUI - we'll control it
             if (animDebugger != null)
@@ -145,11 +142,6 @@ namespace CreatorWorld.Debugging
             showInputDebug = GUI.Toggle(new Rect(200, y, toggleWidth, 20), showInputDebug, "");
             y += lineHeight;
 
-            // Toggle: Grass Stats
-            GUI.Label(new Rect(10, y, 180, 20), "Grass Stats");
-            showGrassStats = GUI.Toggle(new Rect(200, y, toggleWidth, 20), showGrassStats, "");
-            y += lineHeight;
-
             // Separator
             y += 5;
             GUI.Box(new Rect(10, y, 230, 2), "");
@@ -204,41 +196,6 @@ namespace CreatorWorld.Debugging
                 bool ctrl = Keyboard.current.leftCtrlKey.isPressed;
                 bool space = Keyboard.current.spaceKey.isPressed;
                 GUI.Label(new Rect(10, y, 230, 20), $"Shift:{shift} Ctrl:{ctrl} Space:{space}");
-                y += lineHeight;
-            }
-
-            // Grass Stats section
-            if (showGrassStats && grassRenderer != null)
-            {
-                GUI.Label(new Rect(10, y, 230, 20), "--- Grass Performance ---");
-                y += lineHeight;
-
-                int bladeCount = grassRenderer.GetCurrentGrassCount();
-                GUI.Label(new Rect(10, y, 230, 20), $"Blades: {bladeCount:N0}");
-                y += lineHeight;
-
-                bool gpuCulling = grassRenderer.IsGPUCullingEnabled();
-                GUI.Label(new Rect(10, y, 230, 20), $"GPU Culling: {(gpuCulling ? "ON" : "OFF")}");
-                y += lineHeight;
-
-                bool generating = grassRenderer.IsGenerating();
-                if (generating)
-                {
-                    GUI.Label(new Rect(10, y, 230, 20), "Status: GENERATING...");
-                }
-                else
-                {
-                    GUI.Label(new Rect(10, y, 230, 20), "Status: Ready");
-                }
-                y += lineHeight;
-
-                Vector3 center = grassRenderer.GetGrassCenter();
-                GUI.Label(new Rect(10, y, 230, 20), $"Center: ({center.x:F0}, {center.z:F0})");
-                y += lineHeight;
-
-                // Memory estimate (48 bytes per blade)
-                float memoryMB = (bladeCount * 48f) / (1024f * 1024f);
-                GUI.Label(new Rect(10, y, 230, 20), $"GPU Memory: ~{memoryMB:F1} MB");
                 y += lineHeight;
             }
 

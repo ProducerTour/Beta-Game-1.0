@@ -14,6 +14,7 @@ namespace CreatorWorld.Player.Movement
 
         private CharacterController controller;
         private IInputService input;
+        private bool hasWarnedAboutInput;
 
         // State
         private bool isCrouching;
@@ -67,7 +68,11 @@ namespace CreatorWorld.Player.Movement
                 input = ServiceLocator.Get<IInputService>();
                 if (input == null)
                 {
-                    Debug.LogWarning("CrouchHandler: InputService not found!");
+                    if (!hasWarnedAboutInput)
+                    {
+                        Debug.LogWarning("CrouchHandler: InputService not found!");
+                        hasWarnedAboutInput = true;
+                    }
                     return;
                 }
             }

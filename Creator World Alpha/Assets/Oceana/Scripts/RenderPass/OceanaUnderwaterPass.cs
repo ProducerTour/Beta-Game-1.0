@@ -48,15 +48,21 @@ namespace Oceana {
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData) {
             UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
+            UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
             ScreenCopyPassData copyData = frameData.Get<ScreenCopyPassData>();
+
+            // Use the resolved camera depth texture when MSAA is enabled to avoid multisampled texture warnings
+            bool useMSAA = cameraData.cameraTargetDescriptor.msaaSamples > 1;
+            TextureHandle depthSource = useMSAA && resourceData.cameraDepthTexture.IsValid()
+                ? resourceData.cameraDepthTexture
+                : resourceData.activeDepthTexture;
 
             renderGraph.AddBlitPass(resourceData.activeColorTexture, copyData.sceneColor,
                 Vector2.one, Vector2.zero, filterMode: RenderGraphUtils.BlitFilterMode.ClampNearest);
-            renderGraph.AddBlitPass(resourceData.activeDepthTexture, copyData.sceneDepth,
+            renderGraph.AddBlitPass(depthSource, copyData.sceneDepth,
                 Vector2.one, Vector2.zero, filterMode: RenderGraphUtils.BlitFilterMode.ClampNearest);
 
             using (IRasterRenderGraphBuilder builder = renderGraph.AddRasterRenderPass(passName, out UnderwaterPassData passData)) {
-                UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
                 OceanaScrollPass.ScrollGlobalData mapData = frameData.Get<OceanaScrollPass.ScrollGlobalData>();
                 ScreenCopyPassData screenData = frameData.Get<ScreenCopyPassData>();
 

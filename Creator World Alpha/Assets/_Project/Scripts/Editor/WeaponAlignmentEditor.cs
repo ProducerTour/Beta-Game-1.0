@@ -11,8 +11,8 @@ namespace CreatorWorld.Editor
     public class WeaponAlignmentEditor : EditorWindow
     {
         private WeaponAlignment targetWeapon;
-        private Vector3 position;
-        private Vector3 rotation;
+        private Vector3 gripPosition;
+        private Vector3 gripRotation;
         private Vector3 adsPositionOffset;
         private Vector3 adsRotationOffset;
 
@@ -94,23 +94,23 @@ namespace CreatorWorld.Editor
 
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("X", GUILayout.Width(20));
-            if (GUILayout.Button("-", GUILayout.Width(30))) position.x -= positionStep;
-            position.x = EditorGUILayout.FloatField(position.x);
-            if (GUILayout.Button("+", GUILayout.Width(30))) position.x += positionStep;
+            if (GUILayout.Button("-", GUILayout.Width(30))) gripPosition.x -= positionStep;
+            gripPosition.x = EditorGUILayout.FloatField(gripPosition.x);
+            if (GUILayout.Button("+", GUILayout.Width(30))) gripPosition.x += positionStep;
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Y", GUILayout.Width(20));
-            if (GUILayout.Button("-", GUILayout.Width(30))) position.y -= positionStep;
-            position.y = EditorGUILayout.FloatField(position.y);
-            if (GUILayout.Button("+", GUILayout.Width(30))) position.y += positionStep;
+            if (GUILayout.Button("-", GUILayout.Width(30))) gripPosition.y -= positionStep;
+            gripPosition.y = EditorGUILayout.FloatField(gripPosition.y);
+            if (GUILayout.Button("+", GUILayout.Width(30))) gripPosition.y += positionStep;
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Z", GUILayout.Width(20));
-            if (GUILayout.Button("-", GUILayout.Width(30))) position.z -= positionStep;
-            position.z = EditorGUILayout.FloatField(position.z);
-            if (GUILayout.Button("+", GUILayout.Width(30))) position.z += positionStep;
+            if (GUILayout.Button("-", GUILayout.Width(30))) gripPosition.z -= positionStep;
+            gripPosition.z = EditorGUILayout.FloatField(gripPosition.z);
+            if (GUILayout.Button("+", GUILayout.Width(30))) gripPosition.z += positionStep;
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space();
@@ -120,23 +120,23 @@ namespace CreatorWorld.Editor
 
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("X", GUILayout.Width(20));
-            if (GUILayout.Button("-", GUILayout.Width(30))) rotation.x -= rotationStep;
-            rotation.x = EditorGUILayout.FloatField(rotation.x);
-            if (GUILayout.Button("+", GUILayout.Width(30))) rotation.x += rotationStep;
+            if (GUILayout.Button("-", GUILayout.Width(30))) gripRotation.x -= rotationStep;
+            gripRotation.x = EditorGUILayout.FloatField(gripRotation.x);
+            if (GUILayout.Button("+", GUILayout.Width(30))) gripRotation.x += rotationStep;
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Y", GUILayout.Width(20));
-            if (GUILayout.Button("-", GUILayout.Width(30))) rotation.y -= rotationStep;
-            rotation.y = EditorGUILayout.FloatField(rotation.y);
-            if (GUILayout.Button("+", GUILayout.Width(30))) rotation.y += rotationStep;
+            if (GUILayout.Button("-", GUILayout.Width(30))) gripRotation.y -= rotationStep;
+            gripRotation.y = EditorGUILayout.FloatField(gripRotation.y);
+            if (GUILayout.Button("+", GUILayout.Width(30))) gripRotation.y += rotationStep;
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Z", GUILayout.Width(20));
-            if (GUILayout.Button("-", GUILayout.Width(30))) rotation.z -= rotationStep;
-            rotation.z = EditorGUILayout.FloatField(rotation.z);
-            if (GUILayout.Button("+", GUILayout.Width(30))) rotation.z += rotationStep;
+            if (GUILayout.Button("-", GUILayout.Width(30))) gripRotation.z -= rotationStep;
+            gripRotation.z = EditorGUILayout.FloatField(gripRotation.z);
+            if (GUILayout.Button("+", GUILayout.Width(30))) gripRotation.z += rotationStep;
             EditorGUILayout.EndHorizontal();
 
             if (EditorGUI.EndChangeCheck() && livePreview && Application.isPlaying)
@@ -152,20 +152,20 @@ namespace CreatorWorld.Editor
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Rifle"))
             {
-                position = new Vector3(0.05f, 0.02f, 0.1f);
-                rotation = new Vector3(0, 90, 0);
+                gripPosition = new Vector3(0.05f, 0.02f, 0.1f);
+                gripRotation = new Vector3(0, 90, 0);
                 ApplyValues();
             }
             if (GUILayout.Button("Pistol"))
             {
-                position = new Vector3(0.02f, 0.01f, 0.05f);
-                rotation = new Vector3(0, 90, 0);
+                gripPosition = new Vector3(0.02f, 0.01f, 0.05f);
+                gripRotation = new Vector3(0, 90, 0);
                 ApplyValues();
             }
             if (GUILayout.Button("Reset"))
             {
-                position = Vector3.zero;
-                rotation = Vector3.zero;
+                gripPosition = Vector3.zero;
+                gripRotation = Vector3.zero;
                 ApplyValues();
             }
             EditorGUILayout.EndHorizontal();
@@ -223,12 +223,12 @@ namespace CreatorWorld.Editor
                 }
 
                 // Load current values
-                position = targetWeapon.gripPosition;
-                rotation = targetWeapon.gripRotation;
+                gripPosition = targetWeapon.gripPosition;
+                gripRotation = targetWeapon.gripRotation;
 
                 // Also try to get current transform values
-                position = targetWeapon.transform.localPosition;
-                rotation = targetWeapon.transform.localEulerAngles;
+                gripPosition = targetWeapon.transform.localPosition;
+                gripRotation = targetWeapon.transform.localEulerAngles;
 
                 Debug.Log($"Found weapon: {targetWeapon.name}");
                 Repaint();
@@ -243,19 +243,19 @@ namespace CreatorWorld.Editor
         {
             if (targetWeapon == null) return;
 
-            targetWeapon.gripPosition = position;
-            targetWeapon.gripRotation = rotation;
-            targetWeapon.transform.localPosition = position;
-            targetWeapon.transform.localRotation = Quaternion.Euler(rotation);
+            targetWeapon.gripPosition = gripPosition;
+            targetWeapon.gripRotation = gripRotation;
+            targetWeapon.transform.localPosition = gripPosition;
+            targetWeapon.transform.localRotation = Quaternion.Euler(gripRotation);
         }
 
         private void CopyValues()
         {
-            savedValues = $"gripPosition: ({position.x:F3}, {position.y:F3}, {position.z:F3})\n" +
-                         $"gripRotation: ({rotation.x:F1}, {rotation.y:F1}, {rotation.z:F1})";
+            savedValues = $"gripPosition: ({gripPosition.x:F3}, {gripPosition.y:F3}, {gripPosition.z:F3})\n" +
+                         $"gripRotation: ({gripRotation.x:F1}, {gripRotation.y:F1}, {gripRotation.z:F1})";
 
-            string clipboardText = $"Position: new Vector3({position.x:F3}f, {position.y:F3}f, {position.z:F3}f)\n" +
-                                  $"Rotation: new Vector3({rotation.x:F1}f, {rotation.y:F1}f, {rotation.z:F1}f)";
+            string clipboardText = $"Position: new Vector3({gripPosition.x:F3}f, {gripPosition.y:F3}f, {gripPosition.z:F3}f)\n" +
+                                  $"Rotation: new Vector3({gripRotation.x:F1}f, {gripRotation.y:F1}f, {gripRotation.z:F1}f)";
 
             EditorGUIUtility.systemCopyBuffer = clipboardText;
             Debug.Log("Values copied to clipboard:\n" + clipboardText);
@@ -280,7 +280,7 @@ namespace CreatorWorld.Editor
                 Transform parent = targetWeapon.transform.parent;
                 if (parent != null)
                 {
-                    position = parent.InverseTransformPoint(newPos);
+                    gripPosition = parent.InverseTransformPoint(newPos);
                     ApplyValues();
                     Repaint();
                 }

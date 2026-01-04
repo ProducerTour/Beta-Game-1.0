@@ -40,6 +40,9 @@ namespace CreatorWorld.World
         public Vector2Int Coordinate => coordinate;
         public int CurrentLOD => currentLOD;
 
+        // Event fired when chunk mesh is ready for grass generation
+        public System.Action<Chunk> OnChunkReady;
+
         public void Initialize(Vector2Int coord, int chunkSize, int worldSeed, Material material, GameObject[] trees = null, float treeOffset = 0f, GameObject[] rocks = null, float rockOffset = 0f)
         {
             coordinate = coord;
@@ -61,6 +64,9 @@ namespace CreatorWorld.World
             GenerateHeightmap();
             GenerateMeshLODs();
             SetLOD(0);
+
+            // Notify listeners that chunk mesh is ready (for grass generation)
+            OnChunkReady?.Invoke(this);
 
             // Generate decorations after physics sync (coroutine waits for collider to be ready)
             StartCoroutine(GenerateDecorationsDelayed());

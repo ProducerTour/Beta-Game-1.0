@@ -14,7 +14,6 @@ namespace CreatorWorld.Dev
         [SerializeField] private PlayerController playerController;
         [SerializeField] private PlayerCamera playerCamera;
         [SerializeField] private ChunkManager chunkManager;
-        [SerializeField] private ProceduralGrassRenderer grassRenderer;
 
         [Header("Noclip Settings")]
         [SerializeField] private float noclipSpeed = 20f;
@@ -23,7 +22,6 @@ namespace CreatorWorld.Dev
 
         [Header("Dev Menu")]
         [Tooltip("Press P to open dev menu, N for noclip")]
-        [SerializeField] private bool showDebugInfo = true;
 
         // State
         private bool isDevMenuOpen;
@@ -52,9 +50,6 @@ namespace CreatorWorld.Dev
 
             if (chunkManager == null)
                 chunkManager = FindFirstObjectByType<ChunkManager>();
-
-            if (grassRenderer == null)
-                grassRenderer = FindFirstObjectByType<ProceduralGrassRenderer>();
 
             if (playerController != null)
             {
@@ -302,22 +297,6 @@ namespace CreatorWorld.Dev
                     // Show biome weights
                     var weights = TerrainGenerator.GetBiomeWeights(playerTransform.position.x, playerTransform.position.z, 12345);
                     GUILayout.Label($"Weights: S:{weights.r:F2} G:{weights.g:F2} R:{weights.b:F2} Sn:{weights.a:F2}");
-                }
-                GUILayout.EndVertical();
-            }
-
-            // Grass info
-            if (grassRenderer != null)
-            {
-                GUILayout.BeginVertical(GUI.skin.box);
-                GUILayout.Label("Grass", EditorLabelStyle());
-                GUILayout.Label($"Blades: {grassRenderer.GetCurrentGrassCount():N0}");
-                GUILayout.Label($"Center: {grassRenderer.GetGrassCenter():F0}");
-                GUILayout.Label($"Generating: {(grassRenderer.IsGenerating() ? "Yes" : "No")}");
-
-                if (GUILayout.Button("Regenerate Grass", GUILayout.Height(25)))
-                {
-                    grassRenderer.ForceRegenerate();
                 }
                 GUILayout.EndVertical();
             }

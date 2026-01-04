@@ -2,19 +2,36 @@ Shader "CreatorWorld/GrassInstanced"
 {
     Properties
     {
-        _BaseColor ("Base Color", Color) = (0.2, 0.6, 0.1, 1)
-        _TipColor ("Tip Color", Color) = (0.4, 0.8, 0.2, 1)
-        _AOColor ("Ambient Occlusion Color", Color) = (0.1, 0.2, 0.05, 1)
-        _WindStrength ("Wind Strength", Float) = 0.5
-        _WindSpeed ("Wind Speed", Float) = 1.0
-        _WindNoiseScale ("Wind Noise Scale", Float) = 0.1
-        _WindDirection ("Wind Direction", Vector) = (1, 0.5, 0, 0)
-        _AlphaCutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
+        [Header(Colors)]
+        _BaseColor ("Base Color", Color) = (0.15, 0.35, 0.08, 1)
+        _TipColor ("Tip Color", Color) = (0.5, 0.85, 0.25, 1)
+        _AOColor ("Ambient Occlusion Color", Color) = (0.08, 0.12, 0.04, 1)
+        _DryColor ("Dry Grass Tint", Color) = (0.6, 0.55, 0.2, 1)
+        _ColorVariation ("Color Variation", Range(0, 0.5)) = 0.15
+
+        [Header(Wind)]
+        _WindStrength ("Wind Strength", Range(0, 2)) = 0.6
+        _WindSpeed ("Wind Speed", Range(0, 5)) = 1.2
+        _WindNoiseScale ("Wind Noise Scale", Range(0.01, 0.5)) = 0.08
+        _WindDirection ("Wind Direction", Vector) = (1, 0.3, 0, 0)
+        _GustStrength ("Gust Strength", Range(0, 2)) = 0.4
+        _GustFrequency ("Gust Frequency", Range(0.1, 2)) = 0.3
+        _TipWobble ("Tip Wobble", Range(0, 1)) = 0.3
+        _TipWobbleFreq ("Tip Wobble Frequency", Range(1, 10)) = 4
+
+        [Header(Lighting)]
+        _Translucency ("Translucency (SSS)", Range(0, 1)) = 0.4
+        _TranslucencyPower ("Translucency Power", Range(1, 10)) = 3
+        _SpecularStrength ("Specular Strength", Range(0, 1)) = 0.15
+        _SpecularPower ("Specular Power", Range(1, 64)) = 16
+        _MinBrightness ("Min Brightness", Range(0, 1)) = 0.25
+        _ShadowBrightness ("Shadow Brightness", Range(0, 1)) = 0.3
+
+        [Header(Distance)]
         _MaxViewDistance ("Max View Distance", Float) = 150
         _FadeStart ("Fade Start", Range(0, 1)) = 0.7
         _FadeEnd ("Fade End", Range(0, 1)) = 1.0
-        _MinBrightness ("Min Brightness", Range(0, 1)) = 0.3
-        _ShadowBrightness ("Shadow Brightness", Range(0, 1)) = 0.2
+        _AlphaCutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
     }
 
     SubShader
@@ -69,25 +86,35 @@ Shader "CreatorWorld/GrassInstanced"
                 float fogFactor : TEXCOORD4;
                 float fadeAlpha : TEXCOORD5;
                 float density : TEXCOORD6;
+                float colorVar : TEXCOORD7;
             };
 
-            // Instance data buffer (with density)
             StructuredBuffer<GrassData> _TransformBuffer;
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseColor;
                 float4 _TipColor;
                 float4 _AOColor;
+                float4 _DryColor;
+                float _ColorVariation;
                 float _WindStrength;
                 float _WindSpeed;
                 float _WindNoiseScale;
                 float4 _WindDirection;
-                float _AlphaCutoff;
+                float _GustStrength;
+                float _GustFrequency;
+                float _TipWobble;
+                float _TipWobbleFreq;
+                float _Translucency;
+                float _TranslucencyPower;
+                float _SpecularStrength;
+                float _SpecularPower;
+                float _MinBrightness;
+                float _ShadowBrightness;
                 float _MaxViewDistance;
                 float _FadeStart;
                 float _FadeEnd;
-                float _MinBrightness;
-                float _ShadowBrightness;
+                float _AlphaCutoff;
                 float3 _CameraPosition;
                 float _LOD1Threshold;
                 float _LOD2Threshold;
@@ -95,82 +122,134 @@ Shader "CreatorWorld/GrassInstanced"
                 int _LODIndex;
             CBUFFER_END
 
-            // Improved noise function for wind
-            float hash(float2 p)
+            // Hash functions for noise
+            float hash11(float p)
             {
-                return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
+                p = frac(p * 0.1031);
+                p *= p + 33.33;
+                p *= p + p;
+                return frac(p);
             }
 
+            float hash21(float2 p)
+            {
+                float3 p3 = frac(float3(p.xyx) * 0.1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return frac((p3.x + p3.y) * p3.z);
+            }
+
+            // Smooth noise
             float noise(float2 p)
             {
                 float2 i = floor(p);
                 float2 f = frac(p);
                 f = f * f * (3.0 - 2.0 * f);
 
-                float a = hash(i);
-                float b = hash(i + float2(1.0, 0.0));
-                float c = hash(i + float2(0.0, 1.0));
-                float d = hash(i + float2(1.0, 1.0));
+                float a = hash21(i);
+                float b = hash21(i + float2(1.0, 0.0));
+                float c = hash21(i + float2(0.0, 1.0));
+                float d = hash21(i + float2(1.0, 1.0));
 
                 return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
             }
 
-            float2 Unity_SimpleNoise(float2 UV, float Scale)
+            // Fractal brownian motion for natural wind
+            float fbm(float2 p, int octaves)
             {
-                float2 p = UV * Scale;
-                float n = noise(p);
-                float n2 = noise(p * 1.3 + 100.0);
-                return float2(n, n2);
+                float value = 0.0;
+                float amplitude = 0.5;
+                float frequency = 1.0;
+
+                for (int i = 0; i < octaves; i++)
+                {
+                    value += amplitude * noise(p * frequency);
+                    amplitude *= 0.5;
+                    frequency *= 2.0;
+                }
+                return value;
             }
 
             Varyings vert(Attributes input)
             {
                 Varyings output;
 
-                // Get instance data
                 GrassData instanceData = _TransformBuffer[input.instanceID];
                 float4x4 instanceMatrix = instanceData.trs;
                 float density = instanceData.density;
 
+                // Extract instance position for per-blade variation
+                float3 instancePos = float3(instanceMatrix._m03, instanceMatrix._m13, instanceMatrix._m23);
+                float bladeHash = hash21(instancePos.xz);
+
                 // Apply instance transform
                 float4 positionWS = mul(instanceMatrix, float4(input.positionOS.xyz, 1.0));
 
-                // Calculate height gradient (0 at base, 1 at tip)
+                // Height gradient (0 at base, 1 at tip)
                 float heightGradient = saturate(input.positionOS.y);
                 output.heightGradient = heightGradient;
                 output.density = density;
+                output.colorVar = bladeHash;
 
-                // Get instance scale from matrix
+                // Get instance scale
                 float3 scale = float3(
                     length(instanceMatrix._m00_m10_m20),
                     length(instanceMatrix._m01_m11_m21),
                     length(instanceMatrix._m02_m12_m22)
                 );
 
-                // Wind animation (only for LOD0)
-                if (_LODIndex == 0)
+                // Wind animation (LOD0 gets full animation, others simplified)
+                float windMultiplier = _LODIndex == 0 ? 1.0 : (_LODIndex == 1 ? 0.5 : 0.0);
+
+                if (windMultiplier > 0)
                 {
-                    // Height-based deformation with smoothstep
-                    float deformHeight = input.positionOS.y * scale.y + 0.2;
-                    float smoothDeformation = smoothstep(0.0, 1.0, deformHeight);
-
-                    // Sample wind noise
-                    float2 windUV = positionWS.xz + _WindDirection.xy * _Time.y * _WindSpeed;
-                    float2 windNoise = Unity_SimpleNoise(windUV, _WindNoiseScale);
-                    windNoise = windNoise * 2.0 - 1.0; // Remap to -1 to 1
-
-                    // Apply wind distortion
+                    float time = _Time.y * _WindSpeed;
                     float2 windDir = normalize(_WindDirection.xy);
-                    float distortion = smoothDeformation * windNoise.x;
-                    positionWS.xz += distortion * _WindStrength * windDir;
-                    positionWS.y += abs(distortion) * _WindStrength * 0.1; // Slight vertical movement
+
+                    // Height-based deformation curve (stronger at tip)
+                    float deformHeight = input.positionOS.y * scale.y;
+                    float deformCurve = pow(saturate(deformHeight), 2.0);
+
+                    // === Main Wind Layer ===
+                    float2 windUV = positionWS.xz * _WindNoiseScale + windDir * time;
+                    float mainWind = fbm(windUV, 3) * 2.0 - 1.0;
+
+                    // Per-blade phase offset for variation
+                    float phaseOffset = bladeHash * 6.28;
+                    mainWind += sin(time * 2.0 + phaseOffset) * 0.2;
+
+                    // === Wind Gusts ===
+                    float gustTime = time * _GustFrequency;
+                    float gustNoise = noise(positionWS.xz * 0.02 + gustTime);
+                    float gust = smoothstep(0.6, 1.0, gustNoise) * _GustStrength;
+
+                    // === Secondary Tip Wobble ===
+                    float tipWobble = 0.0;
+                    if (heightGradient > 0.5)
+                    {
+                        float tipFactor = (heightGradient - 0.5) * 2.0;
+                        tipWobble = sin(time * _TipWobbleFreq + bladeHash * 10.0) * _TipWobble * tipFactor;
+                    }
+
+                    // Combine wind forces
+                    float totalWind = (mainWind * _WindStrength + gust + tipWobble) * deformCurve * windMultiplier;
+
+                    // Apply wind displacement
+                    positionWS.xz += totalWind * windDir;
+
+                    // Perpendicular sway for more natural motion
+                    float2 perpDir = float2(-windDir.y, windDir.x);
+                    float perpSway = sin(time * 1.5 + bladeHash * 4.0) * 0.3 * deformCurve * windMultiplier;
+                    positionWS.xz += perpSway * perpDir * _WindStrength;
+
+                    // Slight vertical compression when bent
+                    positionWS.y -= abs(totalWind) * 0.1;
                 }
 
                 // Transform normal
                 float3x3 normalMatrix = (float3x3)instanceMatrix;
                 float3 normalWS = normalize(mul(normalMatrix, input.normalOS));
 
-                // Calculate distance fade
+                // Distance fade
                 float distance = length(positionWS.xyz - _CameraPosition);
                 float distanceRatio = distance / _MaxViewDistance;
                 float fadeAlpha = 1.0;
@@ -184,8 +263,6 @@ Shader "CreatorWorld/GrassInstanced"
                 output.positionCS = TransformWorldToHClip(positionWS.xyz);
                 output.normalWS = normalWS;
                 output.uv = input.uv;
-
-                // Fog
                 output.fogFactor = ComputeFogFactor(output.positionCS.z);
 
                 return output;
@@ -193,55 +270,81 @@ Shader "CreatorWorld/GrassInstanced"
 
             half4 frag(Varyings input) : SV_Target
             {
-                // Distance fade alpha test
+                // Distance fade
                 clip(input.fadeAlpha - 0.01);
 
-                // Gradient color from base to tip
-                // AO at very bottom, then base color blending to tip
-                float aoFactor = saturate(input.heightGradient * 4.0); // AO fades quickly
-                float3 baseToTip = lerp(_BaseColor.rgb, _TipColor.rgb, input.heightGradient);
+                // === Color Calculation ===
+                // AO at base fades quickly
+                float aoFactor = saturate(input.heightGradient * 5.0);
+                aoFactor = smoothstep(0.0, 1.0, aoFactor);
+
+                // Base to tip gradient with smooth curve
+                float tipBlend = smoothstep(0.0, 1.0, input.heightGradient);
+                float3 baseToTip = lerp(_BaseColor.rgb, _TipColor.rgb, tipBlend);
+
+                // Apply AO at base
                 float3 grassColor = lerp(_AOColor.rgb, baseToTip, aoFactor);
 
-                // Density-based color variation (denser = slightly darker/richer)
-                grassColor *= lerp(0.9, 1.1, input.density);
+                // Per-blade color variation
+                float3 dryTint = lerp(grassColor, _DryColor.rgb * grassColor, input.colorVar * _ColorVariation);
+                grassColor = lerp(grassColor, dryTint, step(0.5, input.colorVar) * _ColorVariation * 2.0);
 
-                // Lighting
+                // Density-based variation
+                grassColor *= lerp(0.85, 1.15, input.density);
+
+                // === Lighting ===
                 Light mainLight = GetMainLight();
                 float3 lightDir = mainLight.direction;
+                float3 viewDir = normalize(_CameraPosition - input.positionWS);
                 float3 normal = normalize(input.normalWS);
 
-                // Wrap lighting for softer grass look
-                float NdotL = dot(normal, lightDir) * 0.5 + 0.5;
-                NdotL = NdotL * NdotL;
+                // Wrap lighting for soft grass look
+                float NdotL = dot(normal, lightDir);
+                float wrappedNdotL = NdotL * 0.5 + 0.5;
+                wrappedNdotL = wrappedNdotL * wrappedNdotL;
 
-                // Ambient and diffuse
+                // === Subsurface Scattering (Translucency) ===
+                float3 backLitDir = normalize(lightDir + normal * 0.5);
+                float VdotL = saturate(dot(viewDir, -backLitDir));
+                float translucency = pow(VdotL, _TranslucencyPower) * _Translucency;
+                float3 sssColor = mainLight.color * translucency * _TipColor.rgb * input.heightGradient;
+
+                // === Specular Highlight ===
+                float3 halfDir = normalize(lightDir + viewDir);
+                float NdotH = saturate(dot(normal, halfDir));
+                float specular = pow(NdotH, _SpecularPower) * _SpecularStrength * input.heightGradient;
+                float3 specularColor = mainLight.color * specular;
+
+                // Ambient
                 float3 ambient = SampleSH(normal);
-                float3 diffuse = mainLight.color * NdotL;
 
-                // Combine lighting with minimum brightness
-                float3 lighting = ambient + diffuse;
+                // Diffuse
+                float3 diffuse = mainLight.color * wrappedNdotL;
+
+                // Combine lighting
+                float3 lighting = ambient + diffuse + sssColor + specularColor;
                 lighting = max(lighting, _MinBrightness);
 
-                // Apply shadow (if enabled)
+                // Shadows
                 #ifdef _MAIN_LIGHT_SHADOWS
                     float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
                     float shadow = MainLightRealtimeShadow(shadowCoord);
                     shadow = lerp(_ShadowBrightness, 1.0, shadow);
-                    lighting *= shadow;
+                    // SSS still shows through shadows slightly
+                    lighting = lighting * shadow + sssColor * 0.3 * (1.0 - shadow);
                 #endif
 
                 float3 finalColor = grassColor * lighting;
 
-                // Apply fog
+                // Fog
                 finalColor = MixFog(finalColor, input.fogFactor);
 
-                // Output with fade alpha for soft edges
                 return half4(finalColor, input.fadeAlpha);
             }
             ENDHLSL
         }
 
-        // Shadow caster pass (LOD0 only)
+        // Shadow caster pass
         Pass
         {
             Name "ShadowCaster"
@@ -287,7 +390,7 @@ Shader "CreatorWorld/GrassInstanced"
             {
                 Varyings output;
 
-                // Skip shadow rendering for LOD1 and LOD2
+                // Skip shadows for LOD1+
                 if (_LODIndex > 0)
                 {
                     output.positionCS = float4(0, 0, 0, 0);
@@ -313,7 +416,7 @@ Shader "CreatorWorld/GrassInstanced"
             ENDHLSL
         }
 
-        // Depth pass for proper depth sorting
+        // Depth pass
         Pass
         {
             Name "DepthOnly"

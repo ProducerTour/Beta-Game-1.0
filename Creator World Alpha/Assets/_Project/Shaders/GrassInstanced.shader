@@ -9,6 +9,11 @@ Shader "CreatorWorld/GrassInstanced"
         _DryColor ("Dry Grass Tint", Color) = (0.6, 0.55, 0.2, 1)
         _ColorVariation ("Color Variation", Range(0, 0.5)) = 0.15
 
+        [Header(Blade Shape)]
+        _TaperAmount ("Taper Amount", Range(0, 1)) = 0.9
+        _BladeCurve ("Blade Curve", Range(0, 0.5)) = 0.15
+        _BladeWidth ("Blade Width Multiplier", Range(0.5, 2)) = 1.0
+
         [Header(Wind)]
         _WindStrength ("Wind Strength", Range(0, 2)) = 0.6
         _WindSpeed ("Wind Speed", Range(0, 5)) = 1.2
@@ -97,6 +102,9 @@ Shader "CreatorWorld/GrassInstanced"
                 float4 _AOColor;
                 float4 _DryColor;
                 float _ColorVariation;
+                float _TaperAmount;
+                float _BladeCurve;
+                float _BladeWidth;
                 float _WindStrength;
                 float _WindSpeed;
                 float _WindNoiseScale;
@@ -181,11 +189,33 @@ Shader "CreatorWorld/GrassInstanced"
                 float3 instancePos = float3(instanceMatrix._m03, instanceMatrix._m13, instanceMatrix._m23);
                 float bladeHash = hash21(instancePos.xz);
 
-                // Apply instance transform
-                float4 positionWS = mul(instanceMatrix, float4(input.positionOS.xyz, 1.0));
-
-                // Height gradient (0 at base, 1 at tip)
+                // === PROCEDURAL BLADE TAPERING ===
+                // Get height gradient from mesh (Y position normalized 0-1)
                 float heightGradient = saturate(input.positionOS.y);
+
+                // Taper: Shrink width towards tip using power curve for natural look
+                // At base (y=0): taper = 1.0 (full width)
+                // At tip (y=1): taper = 1.0 - _TaperAmount (very thin)
+                float taperCurve = 1.0 - pow(heightGradient, 1.5) * _TaperAmount;
+
+                // Apply taper to X position (width)
+                float3 shapedPos = input.positionOS.xyz;
+                shapedPos.x *= taperCurve * _BladeWidth;
+                shapedPos.z *= taperCurve * _BladeWidth;
+
+                // Add natural curve to the blade (S-curve bend)
+                // Per-blade curve direction for variety
+                float curveDir = (bladeHash - 0.5) * 2.0; // -1 to 1
+                float curveFactor = sin(heightGradient * 3.14159) * _BladeCurve * curveDir;
+                shapedPos.x += curveFactor * heightGradient;
+
+                // Slight forward lean based on height
+                float lean = heightGradient * heightGradient * 0.1 * (bladeHash * 0.5 + 0.5);
+                shapedPos.z += lean;
+
+                // Apply instance transform to shaped position
+                float4 positionWS = mul(instanceMatrix, float4(shapedPos, 1.0));
+
                 output.heightGradient = heightGradient;
                 output.density = density;
                 output.colorVar = bladeHash;
@@ -206,8 +236,7 @@ Shader "CreatorWorld/GrassInstanced"
                     float2 windDir = normalize(_WindDirection.xy);
 
                     // Height-based deformation curve (stronger at tip)
-                    float deformHeight = input.positionOS.y * scale.y;
-                    float deformCurve = pow(saturate(deformHeight), 2.0);
+                    float deformCurve = pow(heightGradient, 2.0);
 
                     // === Main Wind Layer ===
                     float2 windUV = positionWS.xz * _WindNoiseScale + windDir * time;
@@ -245,9 +274,12 @@ Shader "CreatorWorld/GrassInstanced"
                     positionWS.y -= abs(totalWind) * 0.1;
                 }
 
-                // Transform normal
+                // Transform normal (adjusted for tapered shape)
+                float3 adjustedNormal = input.normalOS;
+                // Normals should point more outward at base, more up at tip
+                adjustedNormal = lerp(adjustedNormal, float3(0, 1, 0), heightGradient * 0.5);
                 float3x3 normalMatrix = (float3x3)instanceMatrix;
-                float3 normalWS = normalize(mul(normalMatrix, input.normalOS));
+                float3 normalWS = normalize(mul(normalMatrix, adjustedNormal));
 
                 // Distance fade
                 float distance = length(positionWS.xyz - _CameraPosition);
@@ -385,6 +417,16 @@ Shader "CreatorWorld/GrassInstanced"
 
             float3 _LightDirection;
             int _LODIndex;
+            float _TaperAmount;
+            float _BladeCurve;
+            float _BladeWidth;
+
+            float hash21(float2 p)
+            {
+                float3 p3 = frac(float3(p.xyx) * 0.1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return frac((p3.x + p3.y) * p3.z);
+            }
 
             Varyings ShadowVert(Attributes input)
             {
@@ -399,7 +441,24 @@ Shader "CreatorWorld/GrassInstanced"
 
                 GrassData instanceData = _TransformBuffer[input.instanceID];
                 float4x4 instanceMatrix = instanceData.trs;
-                float4 positionWS = mul(instanceMatrix, float4(input.positionOS.xyz, 1.0));
+
+                // Extract instance position for variation
+                float3 instancePos = float3(instanceMatrix._m03, instanceMatrix._m13, instanceMatrix._m23);
+                float bladeHash = hash21(instancePos.xz);
+
+                // Apply same tapering as main pass
+                float heightGradient = saturate(input.positionOS.y);
+                float taperCurve = 1.0 - pow(heightGradient, 1.5) * _TaperAmount;
+
+                float3 shapedPos = input.positionOS.xyz;
+                shapedPos.x *= taperCurve * _BladeWidth;
+                shapedPos.z *= taperCurve * _BladeWidth;
+
+                float curveDir = (bladeHash - 0.5) * 2.0;
+                float curveFactor = sin(heightGradient * 3.14159) * _BladeCurve * curveDir;
+                shapedPos.x += curveFactor * heightGradient;
+
+                float4 positionWS = mul(instanceMatrix, float4(shapedPos, 1.0));
 
                 float3x3 normalMatrix = (float3x3)instanceMatrix;
                 float3 normalWS = normalize(mul(normalMatrix, input.normalOS));
@@ -451,6 +510,16 @@ Shader "CreatorWorld/GrassInstanced"
             };
 
             StructuredBuffer<GrassData> _TransformBuffer;
+            float _TaperAmount;
+            float _BladeCurve;
+            float _BladeWidth;
+
+            float hash21(float2 p)
+            {
+                float3 p3 = frac(float3(p.xyx) * 0.1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return frac((p3.x + p3.y) * p3.z);
+            }
 
             Varyings DepthVert(Attributes input)
             {
@@ -458,7 +527,24 @@ Shader "CreatorWorld/GrassInstanced"
 
                 GrassData instanceData = _TransformBuffer[input.instanceID];
                 float4x4 instanceMatrix = instanceData.trs;
-                float4 positionWS = mul(instanceMatrix, float4(input.positionOS.xyz, 1.0));
+
+                // Extract instance position for variation
+                float3 instancePos = float3(instanceMatrix._m03, instanceMatrix._m13, instanceMatrix._m23);
+                float bladeHash = hash21(instancePos.xz);
+
+                // Apply same tapering as main pass
+                float heightGradient = saturate(input.positionOS.y);
+                float taperCurve = 1.0 - pow(heightGradient, 1.5) * _TaperAmount;
+
+                float3 shapedPos = input.positionOS.xyz;
+                shapedPos.x *= taperCurve * _BladeWidth;
+                shapedPos.z *= taperCurve * _BladeWidth;
+
+                float curveDir = (bladeHash - 0.5) * 2.0;
+                float curveFactor = sin(heightGradient * 3.14159) * _BladeCurve * curveDir;
+                shapedPos.x += curveFactor * heightGradient;
+
+                float4 positionWS = mul(instanceMatrix, float4(shapedPos, 1.0));
 
                 output.positionCS = TransformWorldToHClip(positionWS.xyz);
 

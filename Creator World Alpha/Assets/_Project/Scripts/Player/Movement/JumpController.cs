@@ -18,9 +18,10 @@ namespace CreatorWorld.Player.Movement
         // State
         private float verticalVelocity;
         private float jumpBufferTimer;
-        private bool jumpConsumed;
+        private float timeSinceJump; // Track time since last jump to prevent instant re-jump
         private bool isJumping;
         private bool isFalling;
+        private bool hasEverBeenGrounded; // Spawn safety: don't apply gravity until first grounded
 
         // Properties
         public float VerticalVelocity => verticalVelocity;
@@ -57,6 +58,9 @@ namespace CreatorWorld.Player.Movement
                 if (input == null) return;
             }
 
+            // Track time since jump
+            timeSinceJump += Time.deltaTime;
+
             HandleJumpBuffer();
             HandleJumpInput();
             ApplyGravity();
@@ -72,7 +76,6 @@ namespace CreatorWorld.Player.Movement
             if (input.JumpPressed)
             {
                 jumpBufferTimer = config.JumpBufferTime;
-                Debug.Log(">>> JUMP BUFFERED <<<");
             }
 
             if (jumpBufferTimer > 0)
@@ -83,22 +86,17 @@ namespace CreatorWorld.Player.Movement
 
         private void HandleJumpInput()
         {
-            if (groundChecker == null) return;
+            if (groundChecker == null || config == null) return;
 
-            // Check if we can jump (grounded OR within coyote time)
-            bool canJump = groundChecker.IsGrounded ||
-                          (groundChecker.WithinCoyoteTime && !jumpConsumed);
+            // Can jump when:
+            // 1. Grounded
+            // 2. Enough time has passed since last jump (prevents bunny hopping exploit)
+            bool canJump = groundChecker.IsGrounded && timeSinceJump > 0.1f;
 
             // Execute jump if buffered and can jump
             if (jumpBufferTimer > 0 && canJump)
             {
                 ExecuteJump();
-            }
-
-            // Reset jump consumed when grounded
-            if (groundChecker.IsGrounded)
-            {
-                jumpConsumed = false;
             }
         }
 
@@ -106,13 +104,14 @@ namespace CreatorWorld.Player.Movement
         {
             if (config == null) return;
 
-            // Apply jump force directly as velocity (Creator World style)
+            // Apply jump force directly as velocity
             verticalVelocity = config.JumpForce;
             jumpBufferTimer = 0;
-            jumpConsumed = true;
+            timeSinceJump = 0; // Reset jump timer
             isJumping = true;
             isFalling = false;
 
+            Debug.Log($"[JumpController] ExecuteJump - verticalVelocity: {verticalVelocity}, OnJump subscribers: {OnJump?.GetInvocationList()?.Length ?? 0}");
             OnJump?.Invoke();
         }
 
@@ -120,22 +119,38 @@ namespace CreatorWorld.Player.Movement
         {
             if (config == null || groundChecker == null) return;
 
-            if (groundChecker.IsGrounded && verticalVelocity < 0)
+            // SPAWN SAFETY: Don't apply gravity until we've been grounded at least once
+            // This prevents falling through the world while waiting for terrain to load
+            if (!hasEverBeenGrounded)
             {
-                // Small negative to keep grounded
+                if (groundChecker.IsGrounded)
+                {
+                    hasEverBeenGrounded = true;
+                }
+                else
+                {
+                    // Hold position while waiting for ground
+                    verticalVelocity = 0f;
+                    return;
+                }
+            }
+
+            // When grounded and not ascending, apply small downward force to stick to ground
+            if (groundChecker.IsGrounded && verticalVelocity <= 0)
+            {
                 verticalVelocity = -2f;
                 return;
             }
 
-            // Apply gravity (Creator World style - consistent gravity)
+            // Apply gravity when airborne
             float gravityMultiplier = 1f;
 
-            // Slight extra gravity when falling for snappier feel
+            // FALLING: Extra gravity when falling for snappy, impactful landings
             if (verticalVelocity < 0)
             {
                 gravityMultiplier = config.FallMultiplier;
             }
-            // Variable jump height - faster fall if jump released early
+            // LOW JUMP: Faster fall if jump released early (variable jump height)
             else if (verticalVelocity > 0 && !input.JumpHeld)
             {
                 gravityMultiplier = config.LowJumpMultiplier;
@@ -151,14 +166,24 @@ namespace CreatorWorld.Player.Movement
         {
             if (groundChecker == null) return;
 
-            if (groundChecker.IsGrounded)
+            // SPAWN SAFETY: Don't report airborne state while waiting for ground
+            // This prevents animator from entering jump/fall states during spawn
+            if (!hasEverBeenGrounded)
             {
-                // Reset air states when grounded
+                isJumping = false;
+                isFalling = false;
+                return;
+            }
+
+            if (groundChecker.IsGrounded && verticalVelocity <= 0)
+            {
+                // Truly grounded and not ascending
                 isJumping = false;
                 isFalling = false;
             }
             else
             {
+                // Airborne
                 if (verticalVelocity > 0)
                 {
                     isJumping = true;
@@ -206,6 +231,15 @@ namespace CreatorWorld.Player.Movement
         public void AddVerticalVelocity(float amount)
         {
             verticalVelocity += amount;
+        }
+
+        /// <summary>
+        /// Reset spawn safety. Call this after teleporting to prevent falling through unloaded terrain.
+        /// </summary>
+        public void ResetSpawnSafety()
+        {
+            hasEverBeenGrounded = false;
+            verticalVelocity = 0f;
         }
     }
 }

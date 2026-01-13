@@ -37,13 +37,18 @@ namespace CreatorWorld.Player
         // State
         private float lastDamageTime;
         private bool isDead;
+        private float previousHunger;
+        private float previousThirst;
+        private float previousStamina;
 
         // Events
         public delegate void HealthChanged(float current, float max);
         public delegate void StatChanged(float current, float max);
+        public delegate void DamageReceived(float amount, DamageType type);
         public delegate void PlayerDied();
 
         public event HealthChanged OnHealthChanged;
+        public event DamageReceived OnDamaged;
         public event StatChanged OnHungerChanged;
         public event StatChanged OnThirstChanged;
         public event StatChanged OnStaminaChanged;
@@ -68,6 +73,9 @@ namespace CreatorWorld.Player
         private void Awake()
         {
             playerController = GetComponent<PlayerController>();
+            previousHunger = currentHunger;
+            previousThirst = currentThirst;
+            previousStamina = currentStamina;
         }
 
         private void Update()
@@ -85,13 +93,13 @@ namespace CreatorWorld.Player
 
         public void TakeDamage(float amount, DamageType type = DamageType.Generic)
         {
-            if (isDead) return;
+            if (isDead || amount <= 0) return;
 
             currentHealth = Mathf.Max(0, currentHealth - amount);
             lastDamageTime = Time.time;
 
+            OnDamaged?.Invoke(amount, type);
             OnHealthChanged?.Invoke(currentHealth, maxHealth);
-            Debug.Log($"[PlayerHealth] Took {amount} {type} damage. Health: {currentHealth}/{maxHealth}");
 
             if (currentHealth <= 0)
             {
@@ -110,7 +118,6 @@ namespace CreatorWorld.Player
         private void Die()
         {
             isDead = true;
-            Debug.Log("[PlayerHealth] Player died!");
 
             // Trigger death animation
             var animation = GetComponent<PlayerAnimation>();
@@ -147,13 +154,21 @@ namespace CreatorWorld.Player
         private void UpdateHunger()
         {
             currentHunger = Mathf.Max(0, currentHunger - hungerDecayRate * Time.deltaTime);
-            OnHungerChanged?.Invoke(currentHunger, maxHunger);
+            if (Mathf.Abs(currentHunger - previousHunger) > 0.01f)
+            {
+                previousHunger = currentHunger;
+                OnHungerChanged?.Invoke(currentHunger, maxHunger);
+            }
         }
 
         private void UpdateThirst()
         {
             currentThirst = Mathf.Max(0, currentThirst - thirstDecayRate * Time.deltaTime);
-            OnThirstChanged?.Invoke(currentThirst, maxThirst);
+            if (Mathf.Abs(currentThirst - previousThirst) > 0.01f)
+            {
+                previousThirst = currentThirst;
+                OnThirstChanged?.Invoke(currentThirst, maxThirst);
+            }
         }
 
         private void UpdateStamina()
@@ -173,7 +188,11 @@ namespace CreatorWorld.Player
                 }
             }
 
-            OnStaminaChanged?.Invoke(currentStamina, maxStamina);
+            if (Mathf.Abs(currentStamina - previousStamina) > 0.01f)
+            {
+                previousStamina = currentStamina;
+                OnStaminaChanged?.Invoke(currentStamina, maxStamina);
+            }
         }
 
         private void UpdateHealthRegen()

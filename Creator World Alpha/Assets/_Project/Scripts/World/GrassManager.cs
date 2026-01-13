@@ -7,9 +7,62 @@ using CreatorWorld.Core;
 namespace CreatorWorld.World
 {
     /// <summary>
+    /// Static initializer to ensure grass shader buffers are bound even when GrassManager doesn't exist.
+    /// Metal requires all StructuredBuffers to be bound before any draw call.
+    /// </summary>
+    public static class GrassShaderInitializer
+    {
+        private static ComputeBuffer globalDummyBuffer;
+        private static readonly int TransformBufferID = Shader.PropertyToID("_TransformBuffer");
+
+        // Size must match GrassData struct: float4x4 (16 floats) + float density (1 float) = 17 floats
+        private const int GrassDataSize = sizeof(float) * 17;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void InitializeOnLoad()
+        {
+            CreateAndBindGlobalBuffer();
+        }
+
+#if UNITY_EDITOR
+        [UnityEditor.InitializeOnLoadMethod]
+        private static void InitializeInEditor()
+        {
+            CreateAndBindGlobalBuffer();
+            UnityEditor.EditorApplication.update += EnsureBufferBoundInEditor;
+        }
+
+        private static void EnsureBufferBoundInEditor()
+        {
+            if (globalDummyBuffer == null || !globalDummyBuffer.IsValid())
+            {
+                CreateAndBindGlobalBuffer();
+            }
+        }
+#endif
+
+        private static void CreateAndBindGlobalBuffer()
+        {
+            if (globalDummyBuffer != null && globalDummyBuffer.IsValid())
+                return;
+
+            globalDummyBuffer?.Release();
+            globalDummyBuffer = new ComputeBuffer(1, GrassDataSize);
+
+            // Initialize with zeroed data
+            float[] zeroData = new float[17];
+            globalDummyBuffer.SetData(zeroData);
+
+            // Bind globally so any material using the grass shader has this buffer
+            Shader.SetGlobalBuffer(TransformBufferID, globalDummyBuffer);
+        }
+    }
+
+    /// <summary>
     /// Advanced grass rendering system with LOD, GPU culling, and biome integration.
     /// Generates grass per chunk using TerrainGenerator density queries.
     /// </summary>
+    [ExecuteAlways] // Ensure buffer binding works in editor
     public class GrassManager : MonoBehaviour
     {
         [Header("References")]
@@ -139,12 +192,32 @@ namespace CreatorWorld.World
                 runtimeCastShadows = settings.castShadows;
             }
 
-            // Create dummy buffer to prevent Metal errors
-            // Metal requires StructuredBuffer to always be bound, even in editor/preview
-            dummyBuffer = new ComputeBuffer(1, GrassInstance.Size);
-            dummyBuffer.SetData(new GrassInstance[1]);
+            // Create and bind dummy buffer immediately
+            EnsureDummyBufferBound();
+        }
 
-            // Immediately bind to material so Metal never sees an unbound buffer
+        private void OnEnable()
+        {
+            // Ensure dummy buffer is bound whenever component is enabled
+            // This handles editor recompilation and scene loading
+            EnsureDummyBufferBound();
+        }
+
+        /// <summary>
+        /// Ensures the dummy buffer exists and is bound to the material.
+        /// Metal requires all StructuredBuffers to be bound before any draw call.
+        /// </summary>
+        private void EnsureDummyBufferBound()
+        {
+            // Create dummy buffer if it doesn't exist
+            if (dummyBuffer == null || !dummyBuffer.IsValid())
+            {
+                dummyBuffer?.Release();
+                dummyBuffer = new ComputeBuffer(1, GrassInstance.Size);
+                dummyBuffer.SetData(new GrassInstance[1]);
+            }
+
+            // Bind to material so Metal never sees an unbound buffer
             if (grassMaterial != null)
             {
                 grassMaterial.SetBuffer(TransformBufferID, dummyBuffer);
@@ -153,31 +226,57 @@ namespace CreatorWorld.World
 
         private void Start()
         {
-            // Subscribe to graphics settings changes
-            GraphicsManager.OnGrassQualityChanged += OnGrassQualityChanged;
-            GraphicsManager.OnSettingsChanged += OnGraphicsSettingsChanged;
+            // Subscribe to graphics settings changes (only in play mode)
+            if (Application.isPlaying)
+            {
+                GraphicsManager.OnGrassQualityChanged += OnGrassQualityChanged;
+                GraphicsManager.OnSettingsChanged += OnGraphicsSettingsChanged;
+            }
+
+            // Ensure buffer is bound at start
+            EnsureDummyBufferBound();
 
             // Setup LOD vertex buffers
             SetupLODBuffers();
         }
 
+        private void OnDisable()
+        {
+            // Clean up buffers when disabled (works in both editor and runtime)
+            CleanupBuffers();
+        }
+
         private void OnDestroy()
         {
-            // Unsubscribe from events
-            GraphicsManager.OnGrassQualityChanged -= OnGrassQualityChanged;
-            GraphicsManager.OnSettingsChanged -= OnGraphicsSettingsChanged;
-
-            // Release all chunk data
-            foreach (var kvp in grassChunks)
+            // Unsubscribe from events (only if we subscribed in play mode)
+            if (Application.isPlaying)
             {
-                kvp.Value.Release();
+                GraphicsManager.OnGrassQualityChanged -= OnGrassQualityChanged;
+                GraphicsManager.OnSettingsChanged -= OnGraphicsSettingsChanged;
             }
-            grassChunks.Clear();
+
+            CleanupBuffers();
+        }
+
+        private void CleanupBuffers()
+        {
+            // Release all chunk data
+            if (grassChunks != null)
+            {
+                foreach (var kvp in grassChunks)
+                {
+                    kvp.Value.Release();
+                }
+                grassChunks.Clear();
+            }
 
             // Release LOD buffers
             lod0VertexBuffer?.Release();
+            lod0VertexBuffer = null;
             lod1VertexBuffer?.Release();
+            lod1VertexBuffer = null;
             lod2VertexBuffer?.Release();
+            lod2VertexBuffer = null;
 
             // Release dummy buffer
             dummyBuffer?.Release();
@@ -186,8 +285,18 @@ namespace CreatorWorld.World
 
         private void Update()
         {
+            // In editor mode, just ensure buffer is bound (don't render)
+            if (!Application.isPlaying)
+            {
+                EnsureDummyBufferBound();
+                return;
+            }
+
             if (mainCamera == null || grassMaterial == null || settings == null)
                 return;
+
+            // Ensure buffer is always bound before any rendering
+            EnsureDummyBufferBound();
 
             UpdateShaderGlobals();
             RenderVisibleGrass();

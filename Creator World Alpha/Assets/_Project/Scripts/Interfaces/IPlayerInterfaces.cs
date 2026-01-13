@@ -63,6 +63,8 @@ namespace CreatorWorld.Interfaces
         bool WeaponCyclePressed { get; }
         bool HolsterPressed { get; }
         bool FireModePressed { get; }
+        bool SlidePressed { get; }
+        bool InteractPressed { get; }
     }
 
     /// <summary>
@@ -74,6 +76,7 @@ namespace CreatorWorld.Interfaces
         Vector3 Forward { get; }
         Vector3 Right { get; }
         bool IsAiming { get; }
+        float Yaw { get; }
     }
 
     /// <summary>
@@ -85,6 +88,20 @@ namespace CreatorWorld.Interfaces
         bool IsPlaying { get; }
         void SetGameState(GameState state);
         event System.Action<GameState> OnStateChanged;
+    }
+
+    /// <summary>
+    /// Interface for audio services.
+    /// </summary>
+    public interface IAudioService
+    {
+        void PlayFootstep(FootstepType type, Vector3 position);
+        void PlayWeaponSound(WeaponSoundType type, Vector3 position);
+        void PlayImpact(SurfaceType surface, Vector3 position);
+        void PlayUISound(UISoundType type);
+        void SetMasterVolume(float volume);
+        void SetSFXVolume(float volume);
+        void SetMusicVolume(float volume);
     }
 
     // Enums moved here for shared access
@@ -119,5 +136,68 @@ namespace CreatorWorld.Interfaces
         Dead,
         Inventory,
         Building
+    }
+
+    public enum FootstepType
+    {
+        Walk,
+        Run,
+        Sprint,
+        Crouch,
+        Land
+    }
+
+    public enum WeaponSoundType
+    {
+        Fire,
+        Reload,
+        ReloadComplete,
+        Empty,
+        Equip,
+        Holster
+    }
+
+    public enum SurfaceType
+    {
+        Default,
+        Grass,
+        Dirt,
+        Stone,
+        Wood,
+        Metal,
+        Water,
+        Sand
+    }
+
+    public enum UISoundType
+    {
+        Click,
+        Hover,
+        Open,
+        Close,
+        Error,
+        Success
+    }
+
+    /// <summary>
+    /// Type of hitbox for damage multipliers.
+    /// AAA Pattern: Separate colliders per body part for precise hit detection.
+    /// </summary>
+    public enum HitboxType
+    {
+        Body,       // 1.0x damage (default)
+        Head,       // 2.0-3.0x damage (headshot)
+        Limb        // 0.75x damage (arms/legs)
+    }
+
+    /// <summary>
+    /// Type of hit feedback to display.
+    /// Used for hit markers and audio selection.
+    /// </summary>
+    public enum HitFeedbackType
+    {
+        Normal,     // White hit marker
+        Headshot,   // Yellow hit marker
+        Kill        // Red kill marker
     }
 }

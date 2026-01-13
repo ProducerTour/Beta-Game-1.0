@@ -1,6 +1,8 @@
+using System;
 using UnityEngine;
 using CreatorWorld.Player;
 using CreatorWorld.Interfaces;
+using CreatorWorld.Enemy;
 
 namespace CreatorWorld.Combat
 {
@@ -41,13 +43,28 @@ namespace CreatorWorld.Combat
         [SerializeField] protected float moveSpread = 1f;
 
         [Header("Audio")]
-        [SerializeField] protected AudioClip fireSound;
+        [Tooltip("Main gunshot sound(s). Multiple clips will be randomized.")]
+        [SerializeField] protected AudioClip[] fireSounds;
+        [Tooltip("Fire tail/echo sound for realism. Plays shortly after main shot.")]
+        [SerializeField] protected AudioClip fireTailSound;
+        [Tooltip("Delay before tail sound plays (seconds)")]
+        [SerializeField] protected float fireTailDelay = 0.05f;
+        [Tooltip("Volume multiplier for tail sound")]
+        [SerializeField, Range(0f, 1f)] protected float fireTailVolume = 0.6f;
         [SerializeField] protected AudioClip reloadSound;
         [SerializeField] protected AudioClip emptySound;
+
+        [Header("Audio (Legacy - use fireSounds array instead)")]
+        [SerializeField] protected AudioClip fireSound; // Kept for backwards compatibility
 
         [Header("Effects")]
         [SerializeField] protected Transform muzzlePoint;
         [SerializeField] protected ParticleSystem muzzleFlash;
+
+        [Header("Bullet Tracer")]
+        [Tooltip("Tracer prefab with BulletTracer component and TrailRenderer")]
+        [SerializeField] protected GameObject bulletTracerPrefab;
+        [Tooltip("Legacy line renderer trail (used if no tracer prefab assigned)")]
         [SerializeField] protected GameObject bulletTrailPrefab;
 
         // State
@@ -64,6 +81,19 @@ namespace CreatorWorld.Combat
         // Events
         public delegate void AmmoChanged(int current, int magazine, int reserve);
         public event AmmoChanged OnAmmoChanged;
+
+        /// <summary>
+        /// Fired when a target is hit. Used by hit feedback systems.
+        /// Parameters: hitPoint, isHeadshot, isKill
+        /// AAA Pattern: Event-driven feedback decouples weapons from UI/audio.
+        /// </summary>
+        public event Action<Vector3, bool, bool> OnTargetHit;
+
+        /// <summary>
+        /// Static event fired when ANY weapon fires. Used by enemy AI for gunshot detection.
+        /// Parameters: shooterPosition, loudness (0-1 range, affects detection radius)
+        /// </summary>
+        public static event Action<Vector3, float> OnGunfired;
 
         // Properties
         public string WeaponName => weaponName;
@@ -131,23 +161,31 @@ namespace CreatorWorld.Combat
             float spread = GetCurrentSpread();
             Vector3 direction = GetFireDirection(spread);
 
-            // Raycast for hit detection
+            // AAA Pattern: Find where crosshair points first, then aim from muzzle toward that point
+            Vector3 aimPoint = GetFireOrigin() + direction * range; // Default: max range
+
+            // First raycast from camera to find aim point (where crosshair points)
             if (Physics.Raycast(GetFireOrigin(), direction, out RaycastHit hit, range))
             {
+                aimPoint = hit.point;
                 OnHit(hit);
             }
 
             // Effects
             PlayMuzzleFlash();
-            PlaySound(fireSound);
+            PlayFireSound();
             ApplyRecoil();
-            SpawnBulletTrail(hit.point != Vector3.zero ? hit.point : GetFireOrigin() + direction * range);
+            SpawnBulletTrail(aimPoint);
 
             // Animation
             playerAnimation?.TriggerFire();
 
-            // Notify
+            // Notify ammo change
             OnAmmoChanged?.Invoke(currentAmmo, magazineSize, reserveAmmo);
+
+            // Alert nearby enemies (gunshot detection)
+            // Loudness of 1.0 = full alert radius, adjust per weapon type if needed
+            OnGunfired?.Invoke(GetFireOrigin(), 1.0f);
 
             // Auto-reload when empty
             if (currentAmmo <= 0 && reserveAmmo > 0)
@@ -159,29 +197,65 @@ namespace CreatorWorld.Combat
         protected virtual void OnHit(RaycastHit hit)
         {
             float damage = baseDamage;
+            bool isHeadshot = false;
+            bool isKill = false;
+            bool hitValidTarget = false; // Track if we hit something damageable
+            Vector3 hitDirection = (hit.point - GetFireOrigin()).normalized;
 
-            // Check for headshot (safely check tag without throwing if not defined)
-            try
+            // AAA Pattern: Check for EnemyHitbox first (provides damage multipliers)
+            var hitbox = hit.collider.GetComponent<EnemyHitbox>();
+            if (hitbox != null)
             {
-                if (hit.collider.CompareTag("Head"))
+                // Use hitbox damage multiplier and headshot detection
+                isHeadshot = hitbox.IsHeadshot;
+                damage *= hitbox.DamageMultiplier;
+
+                // Apply damage through hitbox (routes to EnemyHealth)
+                if (hitbox.Health != null)
                 {
-                    damage *= headshotMultiplier;
-                    Debug.Log($"[Weapon] HEADSHOT! {damage} damage");
+                    hitValidTarget = true;
+                    bool wasAlive = !hitbox.Health.IsDead;
+                    hitbox.ApplyDamage(baseDamage, DamageType.Bullet, hit.point, hitDirection);
+                    isKill = wasAlive && hitbox.Health.IsDead;
+                }
+
+                if (isHeadshot)
+                {
+                    Debug.Log($"[Weapon] HEADSHOT! {damage:F1} damage to {hit.collider.name}");
                 }
             }
-            catch { /* Head tag not defined - ignore */ }
-
-            // Apply damage to target
-            var health = hit.collider.GetComponentInParent<PlayerHealth>();
-            if (health != null)
+            else
             {
-                health.TakeDamage(damage, DamageType.Bullet);
+                // Fallback: Check for IDamageable (works for any damageable entity)
+                var damageable = hit.collider.GetComponentInParent<IDamageable>();
+                if (damageable != null)
+                {
+                    hitValidTarget = true;
+
+                    // Legacy headshot check via tag (for PlayerHealth or other entities)
+                    if (hit.collider.gameObject.tag == "Head")
+                    {
+                        damage *= headshotMultiplier;
+                        isHeadshot = true;
+                        Debug.Log($"[Weapon] HEADSHOT! {damage:F1} damage");
+                    }
+
+                    bool wasAlive = !damageable.IsDead;
+                    damageable.TakeDamage(damage, DamageType.Bullet);
+                    isKill = wasAlive && damageable.IsDead;
+                }
+            }
+
+            // Only fire hit event if we hit a valid target (enemy, player, etc.)
+            if (hitValidTarget)
+            {
+                OnTargetHit?.Invoke(hit.point, isHeadshot, isKill);
             }
 
             // Spawn hit effect
             // TODO: Spawn decal, particle effect at hit.point
 
-            Debug.Log($"[Weapon] Hit {hit.collider.name} for {damage} damage");
+            Debug.Log($"[Weapon] Hit {hit.collider.name} for {damage:F1} damage");
         }
 
         #endregion
@@ -221,6 +295,16 @@ namespace CreatorWorld.Combat
             isReloading = false;
         }
 
+        /// <summary>
+        /// Called by animation event when reload animation completes.
+        /// This allows animation-driven reload timing instead of fixed duration.
+        /// </summary>
+        public virtual void OnReloadAnimationComplete()
+        {
+            if (!isReloading) return;
+            FinishReload();
+        }
+
         #endregion
 
         #region Helpers
@@ -242,8 +326,8 @@ namespace CreatorWorld.Combat
             {
                 float spreadRad = spreadDegrees * Mathf.Deg2Rad;
                 Vector3 spread = new Vector3(
-                    Random.Range(-spreadRad, spreadRad),
-                    Random.Range(-spreadRad, spreadRad),
+                    UnityEngine.Random.Range(-spreadRad, spreadRad),
+                    UnityEngine.Random.Range(-spreadRad, spreadRad),
                     0
                 );
                 baseDirection = Quaternion.Euler(spread) * baseDirection;
@@ -274,7 +358,7 @@ namespace CreatorWorld.Combat
 
         protected void ApplyRecoil()
         {
-            currentRecoil.x += Random.Range(-recoilHorizontal, recoilHorizontal);
+            currentRecoil.x += UnityEngine.Random.Range(-recoilHorizontal, recoilHorizontal);
             currentRecoil.y += recoilVertical;
 
             // TODO: Apply recoil to camera
@@ -296,19 +380,79 @@ namespace CreatorWorld.Combat
             }
         }
 
+        /// <summary>
+        /// Play weapon fire sound with optional tail/echo.
+        /// AAA Pattern: Layered audio - main shot + tail for realistic gunshot sound.
+        /// </summary>
+        protected void PlayFireSound()
+        {
+            if (audioSource == null) return;
+
+            // Pick main fire sound (from array or legacy single clip)
+            AudioClip mainClip = null;
+            if (fireSounds != null && fireSounds.Length > 0)
+            {
+                mainClip = fireSounds[UnityEngine.Random.Range(0, fireSounds.Length)];
+            }
+            else if (fireSound != null)
+            {
+                mainClip = fireSound; // Fallback to legacy
+            }
+
+            // Play main shot
+            if (mainClip != null)
+            {
+                audioSource.PlayOneShot(mainClip);
+            }
+
+            // Play tail sound with delay for realism
+            if (fireTailSound != null)
+            {
+                StartCoroutine(PlayFireTailDelayed());
+            }
+        }
+
+        private System.Collections.IEnumerator PlayFireTailDelayed()
+        {
+            yield return new WaitForSeconds(fireTailDelay);
+
+            if (audioSource != null && fireTailSound != null)
+            {
+                audioSource.PlayOneShot(fireTailSound, fireTailVolume);
+            }
+        }
+
         protected void SpawnBulletTrail(Vector3 endPoint)
         {
-            if (bulletTrailPrefab == null || muzzlePoint == null) return;
-
-            // TODO: Use object pool for bullet trails
-            GameObject trail = Instantiate(bulletTrailPrefab, muzzlePoint.position, Quaternion.identity);
-            var line = trail.GetComponent<LineRenderer>();
-            if (line != null)
+            if (muzzlePoint == null)
             {
-                line.SetPosition(0, muzzlePoint.position);
-                line.SetPosition(1, endPoint);
+                Debug.LogWarning($"[{weaponName}] Cannot spawn bullet trail - muzzlePoint is null!");
+                return;
             }
-            Destroy(trail, 0.1f);
+
+            // Use new tracer system if available
+            if (bulletTracerPrefab != null)
+            {
+                BulletTracer.Spawn(bulletTracerPrefab, muzzlePoint.position, endPoint);
+                return;
+            }
+            else
+            {
+                Debug.Log($"[{weaponName}] No bulletTracerPrefab assigned");
+            }
+
+            // Fallback to legacy LineRenderer trail
+            if (bulletTrailPrefab != null)
+            {
+                GameObject trail = Instantiate(bulletTrailPrefab, muzzlePoint.position, Quaternion.identity);
+                var line = trail.GetComponent<LineRenderer>();
+                if (line != null)
+                {
+                    line.SetPosition(0, muzzlePoint.position);
+                    line.SetPosition(1, endPoint);
+                }
+                Destroy(trail, 0.1f);
+            }
         }
 
         #endregion

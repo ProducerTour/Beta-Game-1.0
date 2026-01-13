@@ -127,11 +127,19 @@ namespace CreatorWorld.Player.Movement
 
             // Use config values or defaults
             float standingHeight = config != null ? config.StandingHeight : 1.8f;
-            LayerMask groundMask = config != null ? config.GroundMask : ~0; // Default: check all layers
+            LayerMask groundMask = config != null ? config.GroundMask : ~0;
 
-            // Check for ceiling above player
-            Vector3 checkPosition = transform.position + Vector3.up * standingHeight;
-            return !Physics.CheckSphere(checkPosition, controller.radius, groundMask);
+            // Exclude player's own layer from ceiling check
+            int playerLayer = gameObject.layer;
+            LayerMask ceilingMask = groundMask & ~(1 << playerLayer);
+
+            // Simple raycast check for ceiling - less prone to issues than SphereCast
+            float checkDistance = standingHeight - currentHeight + 0.1f;
+            Vector3 origin = transform.position + Vector3.up * currentHeight;
+
+            bool hitCeiling = Physics.Raycast(origin, Vector3.up, checkDistance, ceilingMask);
+
+            return !hitCeiling;
         }
 
         private void ApplyHeightTransition()
@@ -154,8 +162,9 @@ namespace CreatorWorld.Player.Movement
             controller.height = currentHeight;
             controller.center = new Vector3(0, currentHeight / 2f, 0);
 
-            // Move player up/down with height change to prevent clipping
-            if (Mathf.Abs(heightDelta) > 0.001f)
+            // Only adjust position when STANDING UP (positive delta)
+            // When crouching down, gravity/grounding handles position naturally
+            if (heightDelta > 0.001f)
             {
                 transform.position += Vector3.up * (heightDelta / 2f);
             }

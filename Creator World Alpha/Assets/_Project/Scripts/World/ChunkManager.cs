@@ -55,6 +55,7 @@ namespace CreatorWorld.World
         public int WorldSeed => worldSeed;
         public int ChunkSize => chunkSize;
         public int ActiveChunkCount => loadedChunks.Count;
+        public bool IsInitialLoadComplete => initialLoadComplete;
 
         private void Start()
         {
@@ -242,7 +243,7 @@ namespace CreatorWorld.World
                 float progress = (float)initialChunksLoaded / initialChunksRequired;
                 GameLoadingScreen.SetStageProgress("terrain", progress, $"Loading chunk {initialChunksLoaded}/{initialChunksRequired}");
 
-                Debug.Log($"[ChunkManager] Loaded chunk {coord} ({initialChunksLoaded}/{initialChunksRequired})");
+                // Per-chunk logging removed to reduce console spam
 
                 if (initialChunksLoaded >= initialChunksRequired)
                 {

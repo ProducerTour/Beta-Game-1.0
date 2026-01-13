@@ -24,7 +24,7 @@ namespace CreatorWorld.Player
         [SerializeField] private float zoomSpeed = 2f;
 
         [Header("First Person (ADS)")]
-        [SerializeField] private float adsDistance = 0.5f;
+        [SerializeField] private float adsDistance = 1.2f;
         [SerializeField] private float adsTransitionSpeed = 10f;
 
         [Header("Rotation")]
@@ -94,6 +94,16 @@ namespace CreatorWorld.Player
             ServiceLocator.Register<ICameraService>(this);
         }
 
+        private void Update()
+        {
+            // Poll aim input in Update so it's available before PlayerAnimation reads it
+            var mouse = Mouse.current;
+            if (mouse != null)
+            {
+                isAiming = mouse.rightButton.isPressed;
+            }
+        }
+
         private void LateUpdate()
         {
             if (target == null)
@@ -121,10 +131,8 @@ namespace CreatorWorld.Player
             lookInput = value.Get<Vector2>();
         }
 
-        public void OnAim(InputValue value)
-        {
-            isAiming = value.isPressed;
-        }
+        // OnAim callback removed - using direct polling in HandleInput() instead
+        // to avoid conflicts between callback and polling approaches
 
         public void OnZoom(InputValue value)
         {
@@ -151,9 +159,7 @@ namespace CreatorWorld.Player
             yaw += mouseX;
             pitch -= mouseY;
             pitch = Mathf.Clamp(pitch, minPitch, maxPitch);
-
-            // Right-click to aim
-            isAiming = mouse.rightButton.isPressed;
+            // Note: isAiming is now polled in Update() for correct timing with animation system
         }
 
         private void HandleRotation()

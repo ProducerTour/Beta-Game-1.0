@@ -35,6 +35,8 @@ namespace CreatorWorld.Input
         private bool weaponCyclePressed;
         private bool holsterPressed;
         private bool fireModePressed;
+        private bool slidePressed;
+        private bool interactPressed;
 
         // Interface implementation
         public Vector2 MoveInput => moveInput;
@@ -52,6 +54,8 @@ namespace CreatorWorld.Input
         public bool WeaponCyclePressed => weaponCyclePressed;
         public bool HolsterPressed => holsterPressed;
         public bool FireModePressed => fireModePressed;
+        public bool SlidePressed => slidePressed;
+        public bool InteractPressed => interactPressed;
 
         private void Awake()
         {
@@ -100,7 +104,6 @@ namespace CreatorWorld.Input
             if (keyboard.spaceKey.wasPressedThisFrame)
             {
                 jumpPressed = true;
-                Debug.Log(">>> JUMP KEY PRESSED <<<");
             }
             jumpHeld = keyboard.spaceKey.isPressed;
 
@@ -111,7 +114,6 @@ namespace CreatorWorld.Input
             if (keyboard.cKey.wasPressedThisFrame || keyboard.leftCtrlKey.wasPressedThisFrame)
             {
                 crouchPressed = true;
-                Debug.Log(">>> CROUCH KEY PRESSED <<<");
             }
 
             // Fire (Left Mouse)
@@ -143,12 +145,10 @@ namespace CreatorWorld.Input
             if (keyboard.digit1Key.wasPressedThisFrame)
             {
                 weaponSwitch1Pressed = true;
-                Debug.Log(">>> WEAPON 1 KEY PRESSED <<<");
             }
             if (keyboard.digit2Key.wasPressedThisFrame)
             {
                 weaponSwitch2Pressed = true;
-                Debug.Log(">>> WEAPON 2 KEY PRESSED <<<");
             }
 
             // Weapon cycle (Tab)
@@ -161,13 +161,24 @@ namespace CreatorWorld.Input
             if (keyboard.hKey.wasPressedThisFrame || keyboard.digit3Key.wasPressedThisFrame)
             {
                 holsterPressed = true;
-                Debug.Log(">>> HOLSTER KEY PRESSED <<<");
             }
 
             // Fire mode toggle (B)
             if (keyboard.bKey.wasPressedThisFrame)
             {
                 fireModePressed = true;
+            }
+
+            // Slide (X)
+            if (keyboard.xKey.wasPressedThisFrame)
+            {
+                slidePressed = true;
+            }
+
+            // Interact (E)
+            if (keyboard.eKey.wasPressedThisFrame)
+            {
+                interactPressed = true;
             }
         }
 
@@ -183,6 +194,8 @@ namespace CreatorWorld.Input
             weaponCyclePressed = false;
             holsterPressed = false;
             fireModePressed = false;
+            slidePressed = false;
+            interactPressed = false;
         }
 
         /// <summary>

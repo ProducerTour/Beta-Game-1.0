@@ -11,6 +11,7 @@ namespace CreatorWorld.Player.Movement
     public class MovementHandler : MonoBehaviour
     {
         [SerializeField] private MovementConfig config;
+        [SerializeField] private BlendTreeConfig blendConfig;
 
         private GroundChecker groundChecker;
         private CrouchHandler crouchHandler;
@@ -29,8 +30,8 @@ namespace CreatorWorld.Player.Movement
         public float CurrentSpeed => currentSpeed;
 
         /// <summary>
-        /// Speed normalized to animator blend tree thresholds:
-        /// 0 = idle, 0.35 = walk, 0.7 = run, 1.0 = sprint
+        /// Speed normalized to animator blend tree thresholds.
+        /// Uses BlendTreeConfig for threshold values, or defaults if not assigned.
         /// </summary>
         public float NormalizedSpeed
         {
@@ -38,25 +39,45 @@ namespace CreatorWorld.Player.Movement
             {
                 if (config == null) return 0f;
 
-                // Map speed to animator thresholds
+                // When crouching, use separate normalization (0 to 1 range for crouch blend tree)
+                if (crouchHandler != null && crouchHandler.IsCrouching)
+                {
+                    if (currentSpeed < 0.1f) return 0f;
+                    // Map 0 -> CrouchSpeed to 0 -> 1 for crouch blend tree
+                    return Mathf.Clamp01(currentSpeed / config.CrouchSpeed);
+                }
+
+                // Use BlendTreeConfig if available, otherwise use hardcoded defaults
+                if (blendConfig != null)
+                {
+                    return blendConfig.GetNormalizedSpeed(
+                        currentSpeed,
+                        config.WalkSpeed,
+                        config.RunSpeed,
+                        config.SprintSpeed
+                    );
+                }
+
+                // Fallback: Map speed to blend tree positions
+                // 0 = idle (0,0), 0.5 = walk (0,0.5), 1.0 = run/sprint (0,1)
+                // These MUST match the blend tree Y positions in PlayerAnimator.controller
                 if (currentSpeed < 0.1f) return 0f;
 
                 if (currentSpeed <= config.WalkSpeed)
                 {
-                    // 0 to WalkSpeed maps to 0 to 0.35
-                    return Mathf.Lerp(0f, 0.35f, currentSpeed / config.WalkSpeed);
+                    // 0 to WalkSpeed → 0 to 0.5 (idle to walk position)
+                    return Mathf.Lerp(0f, 0.5f, currentSpeed / config.WalkSpeed);
                 }
                 else if (currentSpeed <= config.RunSpeed)
                 {
-                    // WalkSpeed to RunSpeed maps to 0.35 to 0.7
+                    // WalkSpeed to RunSpeed → 0.5 to 1.0 (walk to run position)
                     float t = (currentSpeed - config.WalkSpeed) / (config.RunSpeed - config.WalkSpeed);
-                    return Mathf.Lerp(0.35f, 0.7f, t);
+                    return Mathf.Lerp(0.5f, 1.0f, t);
                 }
                 else
                 {
-                    // RunSpeed to SprintSpeed maps to 0.7 to 1.0
-                    float t = (currentSpeed - config.RunSpeed) / (config.SprintSpeed - config.RunSpeed);
-                    return Mathf.Lerp(0.7f, 1.0f, t);
+                    // Beyond RunSpeed (sprint) → cap at 1.0 (run position, no separate sprint animation)
+                    return 1.0f;
                 }
             }
         }
@@ -93,10 +114,17 @@ namespace CreatorWorld.Player.Movement
         /// </summary>
         public void UpdateMovement()
         {
+            // Lazy load input service
             if (input == null)
             {
                 input = ServiceLocator.Get<IInputService>();
                 if (input == null) return;
+            }
+
+            // Lazy load camera service (may not be registered on first frame)
+            if (cameraService == null)
+            {
+                cameraService = ServiceLocator.Get<ICameraService>();
             }
 
             CalculateTargetSpeed();
@@ -117,10 +145,26 @@ namespace CreatorWorld.Player.Movement
                 return;
             }
 
+            // Check if aiming or firing - force walk speed when ADS or hip-firing
+            bool isAiming = cameraService != null && cameraService.IsAiming;
+            bool isFiring = input.FireHeld;
+
             // Determine speed based on state
             if (crouchHandler != null && crouchHandler.IsCrouching)
             {
                 targetSpeed = config.CrouchSpeed;
+                isSprinting = false;
+            }
+            else if (isAiming)
+            {
+                // Aiming forces slower walk speed - no sprinting or running while ADS
+                targetSpeed = config.AimWalkSpeed;
+                isSprinting = false;
+            }
+            else if (isFiring)
+            {
+                // Hip-firing forces slower walk speed - can't sprint while shooting
+                targetSpeed = config.HipFireWalkSpeed;
                 isSprinting = false;
             }
             else if (input.SprintHeld && moveInput.y > config.SprintForwardThreshold)
@@ -141,8 +185,8 @@ namespace CreatorWorld.Player.Movement
                 isSprinting = false;
             }
 
-            // Pure strafing uses strafe speed
-            if (IsStrafing)
+            // Pure strafing uses strafe speed - only when aiming (unarmed can run any direction)
+            if (IsStrafing && isAiming)
             {
                 targetSpeed = Mathf.Min(targetSpeed, config.StrafeSpeed);
             }
@@ -152,15 +196,43 @@ namespace CreatorWorld.Player.Movement
         {
             if (config == null) return;
 
+            // When aiming or hip-firing, instantly cap speed (no gradual slowdown)
+            bool isAiming = cameraService != null && cameraService.IsAiming;
+            bool isFiring = input.FireHeld;
+
+            if (isAiming && currentSpeed > config.AimWalkSpeed)
+            {
+                currentSpeed = config.AimWalkSpeed;
+            }
+            else if (isFiring && currentSpeed > config.HipFireWalkSpeed)
+            {
+                currentSpeed = config.HipFireWalkSpeed;
+            }
+
             // Reduce control in air
             float controlMultiplier = groundChecker != null && groundChecker.IsGrounded
                 ? 1f
                 : config.AirControlMultiplier;
 
-            float accel = (input.MoveInput.magnitude > config.MoveDeadzone
-                ? config.Acceleration
-                : config.Deceleration) * controlMultiplier;
+            // Determine whether to accelerate or decelerate
+            float accel;
+            if (input.MoveInput.magnitude < config.MoveDeadzone)
+            {
+                // No input - decelerate to stop
+                accel = config.Deceleration;
+            }
+            else if (targetSpeed < currentSpeed)
+            {
+                // Moving but slowing down (e.g., from run to walk when aiming)
+                accel = config.Deceleration;
+            }
+            else
+            {
+                // Speeding up
+                accel = config.Acceleration;
+            }
 
+            accel *= controlMultiplier;
             currentSpeed = Mathf.Lerp(currentSpeed, targetSpeed, Time.deltaTime * accel);
         }
 
@@ -253,7 +325,7 @@ namespace CreatorWorld.Player.Movement
         /// </summary>
         public Quaternion GetTargetRotation()
         {
-            if (moveDirection.magnitude > 0.1f && !IsStrafing)
+            if (moveDirection.magnitude > 0.1f)
             {
                 return Quaternion.LookRotation(moveDirection);
             }

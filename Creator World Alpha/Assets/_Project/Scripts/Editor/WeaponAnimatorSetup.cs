@@ -3,6 +3,7 @@ using UnityEditor;
 using UnityEditor.Animations;
 using System.IO;
 using System.Collections.Generic;
+using CreatorWorld.Config;
 
 namespace CreatorWorld.Editor
 {
@@ -12,10 +13,11 @@ namespace CreatorWorld.Editor
     /// </summary>
     public class WeaponAnimatorSetup
     {
-        private const string CONTROLLER_PATH = "Assets/_Project/Settings/XBotAnimator.controller";
-        private const string RIFLE_FBX_PATH = "Assets/Art/Animations/Rifle_FBX";
-        private const string PISTOL_FBX_PATH = "Assets/Art/Animations/Pistol_FBX";
-        private const string LOCOMOTION_FBX_PATH = "Assets/Art/Animations/Locomotion_FBX";
+        // Use centralized paths
+        private static string ControllerPath => AnimationPaths.XBotAnimatorController;
+        private static string RiflePath => AnimationPaths.Current.RifleAnimations;
+        private static string PistolPath => AnimationPaths.Current.PistolAnimations;
+        private static string LocomotionPath => AnimationPaths.Current.BasicLocomotion;
 
         [MenuItem("Tools/Creator World/Setup Weapon Animations (Multi-Layer)")]
         public static void SetupWeaponAnimations()
@@ -28,18 +30,21 @@ namespace CreatorWorld.Editor
 
             Debug.Log("=== Setting up Multi-Weapon Animator ===");
 
+            // Validate paths exist
+            AnimationPaths.ValidateCurrentFolders();
+
             // Load animation clips
-            var rifleClips = LoadClipsFromFolder(RIFLE_FBX_PATH, "rifle");
-            var pistolClips = LoadClipsFromFolder(PISTOL_FBX_PATH, "pistol");
-            var locomotionClips = LoadClipsFromFolder(LOCOMOTION_FBX_PATH, "loco");
+            var rifleClips = LoadClipsFromFolder(RiflePath, "rifle");
+            var pistolClips = LoadClipsFromFolder(PistolPath, "pistol");
+            var locomotionClips = LoadClipsFromFolder(LocomotionPath, "loco");
 
             Debug.Log($"Loaded: {rifleClips.Count} rifle, {pistolClips.Count} pistol, {locomotionClips.Count} locomotion clips");
 
             // Create or load controller
-            var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(CONTROLLER_PATH);
+            var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(ControllerPath);
             if (controller == null)
             {
-                controller = AnimatorController.CreateAnimatorControllerAtPath(CONTROLLER_PATH);
+                controller = AnimatorController.CreateAnimatorControllerAtPath(ControllerPath);
             }
 
             // Clear existing layers (except base)
@@ -148,7 +153,7 @@ namespace CreatorWorld.Editor
             newLayer.stateMachine.hideFlags = HideFlags.HideInHierarchy;
 
             // Save state machine as sub-asset
-            AssetDatabase.AddObjectToAsset(newLayer.stateMachine, CONTROLLER_PATH);
+            AssetDatabase.AddObjectToAsset(newLayer.stateMachine, ControllerPath);
 
             controller.AddLayer(newLayer);
 
@@ -247,7 +252,7 @@ namespace CreatorWorld.Editor
                 tree.AddChild(run, 1.0f); // Sprint uses run
             }
 
-            AssetDatabase.AddObjectToAsset(tree, CONTROLLER_PATH);
+            AssetDatabase.AddObjectToAsset(tree, ControllerPath);
             return tree;
         }
 

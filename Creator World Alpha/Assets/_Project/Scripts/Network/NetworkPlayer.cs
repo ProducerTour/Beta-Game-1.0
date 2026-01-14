@@ -90,6 +90,14 @@ namespace CreatorWorld.Network
             controller = GetComponent<CharacterController>();
             animator = GetComponentInChildren<Animator>();
 
+            // Server: Initialize network variables with spawn position
+            if (IsServer)
+            {
+                serverPosition.Value = transform.position;
+                serverRotation.Value = transform.rotation;
+                Debug.Log($"[NetworkPlayer] Server initialized position: {transform.position}");
+            }
+
             if (IsOwner)
             {
                 // Local player setup
@@ -107,13 +115,15 @@ namespace CreatorWorld.Network
             }
             else
             {
-                // Remote player setup
-                interpolationTarget = transform.position;
-                rotationTarget = transform.rotation;
+                // Remote player setup - use server position if available, otherwise transform
+                interpolationTarget = serverPosition.Value != Vector3.zero ? serverPosition.Value : transform.position;
+                rotationTarget = serverRotation.Value;
 
                 // Subscribe to state changes for interpolation
                 serverPosition.OnValueChanged += OnServerPositionChanged;
                 serverRotation.OnValueChanged += OnServerRotationChanged;
+
+                Debug.Log($"[NetworkPlayer] Remote player initial position: {interpolationTarget}");
             }
 
             // Subscribe to health changes

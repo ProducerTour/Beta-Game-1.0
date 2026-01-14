@@ -18,7 +18,7 @@ namespace CreatorWorld.Network
         [Header("Network Configuration")]
         [SerializeField] private int maxPlayers = 100;
         [SerializeField] private ushort port = 7777;
-        [SerializeField] private string gameSceneName = "Game";
+        [SerializeField] private string gameSceneName = "";
 
         [Header("Server Settings")]
         [SerializeField] private int tickRate = 30;

@@ -17,9 +17,9 @@ namespace CreatorWorld.Network
         public static SessionGameBridge Instance { get; private set; }
 
         [Header("Configuration")]
-        [SerializeField] private string gameSceneName = "Game";
+        [SerializeField] private string gameSceneName = "";
         [SerializeField] private bool autoInitialize = true;
-        [SerializeField] private bool loadGameSceneOnJoin = true;
+        [SerializeField] private bool loadGameSceneOnJoin = false;
 
         [Header("Debug")]
         [SerializeField] private bool enableDebugLogs = true;

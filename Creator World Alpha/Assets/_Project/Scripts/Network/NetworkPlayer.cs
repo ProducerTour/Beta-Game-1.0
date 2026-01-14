@@ -614,7 +614,7 @@ namespace CreatorWorld.Network
 
         private void UpdateAnimator()
         {
-            if (animator == null) return;
+            if (animator == null || animator.runtimeAnimatorController == null) return;
 
             PlayerAnimState state;
             if (IsOwner)

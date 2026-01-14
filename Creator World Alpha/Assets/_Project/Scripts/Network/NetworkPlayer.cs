@@ -125,11 +125,11 @@ namespace CreatorWorld.Network
 
         private void HandleLocalMovement()
         {
-            // Get input
-            float horizontal = Input.GetAxis("Horizontal");
-            float vertical = Input.GetAxis("Vertical");
-            bool jump = Input.GetButtonDown("Jump");
-            bool sprint = Input.GetKey(KeyCode.LeftShift);
+            // Get input (fully qualified to avoid namespace conflict with CreatorWorld.Input)
+            float horizontal = UnityEngine.Input.GetAxis("Horizontal");
+            float vertical = UnityEngine.Input.GetAxis("Vertical");
+            bool jump = UnityEngine.Input.GetButtonDown("Jump");
+            bool sprint = UnityEngine.Input.GetKey(KeyCode.LeftShift);
 
             // Calculate movement direction
             Vector3 moveDirection = (transform.forward * vertical + transform.right * horizontal).normalized;
@@ -163,7 +163,7 @@ namespace CreatorWorld.Network
             controller.Move(velocity * Time.deltaTime);
 
             // Mouse rotation
-            float mouseX = Input.GetAxis("Mouse X") * rotationSpeed * Time.deltaTime;
+            float mouseX = UnityEngine.Input.GetAxis("Mouse X") * rotationSpeed * Time.deltaTime;
             transform.Rotate(0f, mouseX, 0f);
 
             // Sync position to network

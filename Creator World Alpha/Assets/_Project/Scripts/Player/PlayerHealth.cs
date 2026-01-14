@@ -59,10 +59,13 @@ namespace CreatorWorld.Player
         public float MaxHealth => maxHealth;
         public float HealthPercent => currentHealth / maxHealth;
         public float CurrentHunger => currentHunger;
+        public float MaxHunger => maxHunger;
         public float HungerPercent => currentHunger / maxHunger;
         public float CurrentThirst => currentThirst;
+        public float MaxThirst => maxThirst;
         public float ThirstPercent => currentThirst / maxThirst;
         public float CurrentStamina => currentStamina;
+        public float MaxStamina => maxStamina;
         public float StaminaPercent => currentStamina / maxStamina;
         public bool IsDead => isDead;
         public bool IsStarving => currentHunger <= 0;

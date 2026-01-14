@@ -1,6 +1,8 @@
 using UnityEngine;
+using Unity.Netcode;
 using CreatorWorld.Player;
 using CreatorWorld.World;
+using CreatorWorld.Network;
 
 namespace CreatorWorld.Dev
 {
@@ -39,6 +41,21 @@ namespace CreatorWorld.Dev
         private Vector3 savedPlayerPosition;
         private bool wasCharacterControllerEnabled;
 
+        // Scroll and sections
+        private Vector2 scrollPosition;
+        private bool showMultiplayer = true;
+        private bool showMovement = true;
+        private bool showTerrain = true;
+        private bool showPlayer = false;
+
+        // Multiplayer state
+        private string joinCode = "";
+        private string networkStatus = "Not connected";
+        private bool servicesInitialized = false;
+
+        // Player health reference
+        private PlayerHealth playerHealth;
+
         private void Start()
         {
             // Auto-find references if not assigned
@@ -61,7 +78,7 @@ namespace CreatorWorld.Dev
             if (mainCamera != null)
                 cameraTransform = mainCamera.transform;
 
-            Debug.Log("[DevManager] Initialized. Press P for dev menu, N for noclip.");
+            playerHealth = FindFirstObjectByType<PlayerHealth>();
         }
 
         private void Update()
@@ -212,8 +229,8 @@ namespace CreatorWorld.Dev
             if (!isDevMenuOpen) return;
 
             // Dev menu background
-            float menuWidth = 350f;
-            float menuHeight = 500f;
+            float menuWidth = 380f;
+            float menuHeight = 550f;
             float menuX = (Screen.width - menuWidth) / 2f;
             float menuY = (Screen.height - menuHeight) / 2f;
 
@@ -229,82 +246,48 @@ namespace CreatorWorld.Dev
                 alignment = TextAnchor.MiddleCenter
             };
             GUILayout.Label("DEV MENU", titleStyle);
-            GUILayout.Space(10);
-
-            // Current state info
-            GUILayout.Label($"Press P to close | N to toggle noclip");
+            GUILayout.Label("P to close | N for noclip", new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter });
             GUILayout.Space(5);
 
-            // Noclip section
-            GUILayout.BeginVertical(GUI.skin.box);
-            GUILayout.Label("Movement", EditorLabelStyle());
+            // Scrollable content
+            scrollPosition = GUILayout.BeginScrollView(scrollPosition, GUILayout.Height(menuHeight - 100));
 
-            string noclipStatus = isNoclipEnabled ? "<color=lime>ENABLED</color>" : "<color=red>DISABLED</color>";
-            if (GUILayout.Button($"Noclip: {(isNoclipEnabled ? "ON" : "OFF")} [N]", GUILayout.Height(30)))
+            // === MULTIPLAYER SECTION ===
+            DrawSectionHeader("MULTIPLAYER", ref showMultiplayer);
+            if (showMultiplayer)
             {
-                ToggleNoclip();
+                DrawMultiplayerSection();
+            }
+            GUILayout.Space(5);
+
+            // === MOVEMENT SECTION ===
+            DrawSectionHeader("MOVEMENT", ref showMovement);
+            if (showMovement)
+            {
+                DrawMovementSection();
+            }
+            GUILayout.Space(5);
+
+            // === PLAYER SECTION ===
+            DrawSectionHeader("PLAYER", ref showPlayer);
+            if (showPlayer)
+            {
+                DrawPlayerSection();
+            }
+            GUILayout.Space(5);
+
+            // === TERRAIN SECTION ===
+            DrawSectionHeader("TERRAIN", ref showTerrain);
+            if (showTerrain)
+            {
+                DrawTerrainSection();
             }
 
-            if (isNoclipEnabled)
-            {
-                GUILayout.Label("WASD - Move | Q/E - Down/Up");
-                GUILayout.Label("Shift - Sprint | Space - Up");
-            }
+            GUILayout.EndScrollView();
 
-            GUILayout.Label($"Speed: {noclipSpeed}");
-            noclipSpeed = GUILayout.HorizontalSlider(noclipSpeed, 5f, 100f);
-            GUILayout.EndVertical();
-
-            GUILayout.Space(10);
-
-            // Position info
-            GUILayout.BeginVertical(GUI.skin.box);
-            GUILayout.Label("Position", EditorLabelStyle());
-            if (playerTransform != null)
-            {
-                Vector3 pos = playerTransform.position;
-                GUILayout.Label($"X: {pos.x:F1}  Y: {pos.y:F1}  Z: {pos.z:F1}");
-            }
-
-            if (GUILayout.Button("Teleport to Origin", GUILayout.Height(25)))
-            {
-                TeleportTo(new Vector3(0, 50, 0));
-            }
-
-            if (GUILayout.Button("Teleport to Mountain", GUILayout.Height(25)))
-            {
-                TeleportTo(new Vector3(500, 150, 500));
-            }
-            GUILayout.EndVertical();
-
-            GUILayout.Space(10);
-
-            // Terrain info
-            if (chunkManager != null)
-            {
-                GUILayout.BeginVertical(GUI.skin.box);
-                GUILayout.Label("Terrain", EditorLabelStyle());
-                GUILayout.Label($"Active Chunks: {chunkManager.ActiveChunkCount}");
-
-                if (playerTransform != null)
-                {
-                    float height = TerrainGenerator.GetHeightAt(playerTransform.position.x, playerTransform.position.z, 12345);
-                    GUILayout.Label($"Ground Height: {height:F1}m");
-
-                    var biome = TerrainGenerator.GetBiomeAt(playerTransform.position.x, playerTransform.position.z, 12345);
-                    GUILayout.Label($"Biome: {biome}");
-
-                    // Show biome weights
-                    var weights = TerrainGenerator.GetBiomeWeights(playerTransform.position.x, playerTransform.position.z, 12345);
-                    GUILayout.Label($"Weights: S:{weights.r:F2} G:{weights.g:F2} R:{weights.b:F2} Sn:{weights.a:F2}");
-                }
-                GUILayout.EndVertical();
-            }
-
-            GUILayout.FlexibleSpace();
-
-            // Close button
-            if (GUILayout.Button("Close [P]", GUILayout.Height(35)))
+            // Close button (fixed at bottom)
+            GUILayout.Space(5);
+            if (GUILayout.Button("Close [P]", GUILayout.Height(30)))
             {
                 ToggleDevMenu();
             }
@@ -312,14 +295,254 @@ namespace CreatorWorld.Dev
             GUILayout.EndArea();
         }
 
-        private GUIStyle EditorLabelStyle()
+        private void DrawSectionHeader(string title, ref bool expanded)
         {
-            return new GUIStyle(GUI.skin.label)
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button(expanded ? "[-]" : "[+]", GUILayout.Width(30), GUILayout.Height(22)))
             {
-                fontStyle = FontStyle.Bold,
-                fontSize = 14
-            };
+                expanded = !expanded;
+            }
+            GUILayout.Label(title, GUI.skin.box, GUILayout.Height(22));
+            GUILayout.EndHorizontal();
         }
+
+        private void DrawMultiplayerSection()
+        {
+            GUILayout.BeginVertical(GUI.skin.box);
+
+            if (NetworkManager.Singleton == null)
+            {
+                GUILayout.Label("NetworkManager not found");
+                GUILayout.EndVertical();
+                return;
+            }
+
+            if (!NetworkManager.Singleton.IsClient && !NetworkManager.Singleton.IsServer)
+            {
+                GUILayout.Label($"Status: {networkStatus}");
+
+                GUI.enabled = !servicesInitialized;
+                if (GUILayout.Button(servicesInitialized ? "Services Ready" : "Initialize Services", GUILayout.Height(28)))
+                {
+                    InitializeNetworkServices();
+                }
+                GUI.enabled = true;
+
+                if (servicesInitialized)
+                {
+                    GUILayout.Space(5);
+                    if (GUILayout.Button("CREATE SESSION (Host)", GUILayout.Height(28)))
+                    {
+                        CreateNetworkSession();
+                    }
+
+                    GUILayout.Label("Join Code:");
+                    joinCode = GUILayout.TextField(joinCode, GUILayout.Height(22));
+                    if (GUILayout.Button("JOIN SESSION", GUILayout.Height(28)))
+                    {
+                        JoinNetworkSession();
+                    }
+                }
+
+                GUILayout.Space(5);
+                GUILayout.Label("--- Local ---");
+                if (GUILayout.Button("Host (Local)", GUILayout.Height(25)))
+                {
+                    NetworkManager.Singleton.StartHost();
+                    networkStatus = "Local host";
+                }
+            }
+            else
+            {
+                string mode = NetworkManager.Singleton.IsHost ? "HOST" :
+                              NetworkManager.Singleton.IsServer ? "SERVER" : "CLIENT";
+                GUILayout.Label($"Connected: {mode}");
+                GUILayout.Label($"Players: {NetworkManager.Singleton.ConnectedClientsIds.Count}");
+
+                var bridge = SessionGameBridge.Instance;
+                if (bridge != null && !string.IsNullOrEmpty(bridge.CurrentSessionCode))
+                {
+                    GUILayout.Label($"Code: {bridge.CurrentSessionCode}");
+                }
+
+                if (GUILayout.Button("DISCONNECT", GUILayout.Height(28)))
+                {
+                    DisconnectNetwork();
+                }
+            }
+
+            GUILayout.EndVertical();
+        }
+
+        private void DrawMovementSection()
+        {
+            GUILayout.BeginVertical(GUI.skin.box);
+
+            if (GUILayout.Button($"Noclip: {(isNoclipEnabled ? "ON" : "OFF")} [N]", GUILayout.Height(28)))
+            {
+                ToggleNoclip();
+            }
+
+            if (isNoclipEnabled)
+            {
+                GUILayout.Label("WASD + Q/E | Shift = Sprint");
+            }
+
+            GUILayout.Label($"Speed: {noclipSpeed:F0}");
+            noclipSpeed = GUILayout.HorizontalSlider(noclipSpeed, 5f, 100f);
+
+            GUILayout.Space(5);
+            if (playerTransform != null)
+            {
+                Vector3 pos = playerTransform.position;
+                GUILayout.Label($"Pos: {pos.x:F0}, {pos.y:F0}, {pos.z:F0}");
+            }
+
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Origin"))
+            {
+                TeleportTo(new Vector3(0, 50, 0));
+            }
+            if (GUILayout.Button("Mountain"))
+            {
+                TeleportTo(new Vector3(500, 150, 500));
+            }
+            GUILayout.EndHorizontal();
+
+            GUILayout.EndVertical();
+        }
+
+        private void DrawPlayerSection()
+        {
+            GUILayout.BeginVertical(GUI.skin.box);
+
+            if (playerHealth == null)
+            {
+                playerHealth = FindFirstObjectByType<PlayerHealth>();
+            }
+
+            if (playerHealth == null)
+            {
+                GUILayout.Label("PlayerHealth not found");
+                GUILayout.EndVertical();
+                return;
+            }
+
+            GUILayout.Label($"Health: {playerHealth.CurrentHealth:F0}/{playerHealth.MaxHealth:F0}");
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("-10")) playerHealth.TakeDamage(10);
+            if (GUILayout.Button("+10")) playerHealth.Heal(10);
+            if (GUILayout.Button("Full")) playerHealth.Heal(playerHealth.MaxHealth);
+            GUILayout.EndHorizontal();
+
+            GUILayout.Label($"Hunger: {playerHealth.CurrentHunger:F0}/{playerHealth.MaxHunger:F0}");
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("+25")) playerHealth.Eat(25);
+            if (GUILayout.Button("Full")) playerHealth.Eat(playerHealth.MaxHunger);
+            GUILayout.EndHorizontal();
+
+            GUILayout.Label($"Thirst: {playerHealth.CurrentThirst:F0}/{playerHealth.MaxThirst:F0}");
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("+25")) playerHealth.Drink(25);
+            if (GUILayout.Button("Full")) playerHealth.Drink(playerHealth.MaxThirst);
+            GUILayout.EndHorizontal();
+
+            GUILayout.Label($"Stamina: {playerHealth.CurrentStamina:F0}/{playerHealth.MaxStamina:F0}");
+
+            GUILayout.EndVertical();
+        }
+
+        private void DrawTerrainSection()
+        {
+            GUILayout.BeginVertical(GUI.skin.box);
+
+            if (chunkManager != null)
+            {
+                GUILayout.Label($"Active Chunks: {chunkManager.ActiveChunkCount}");
+            }
+
+            if (playerTransform != null)
+            {
+                float height = TerrainGenerator.GetHeightAt(playerTransform.position.x, playerTransform.position.z, 12345);
+                GUILayout.Label($"Ground: {height:F1}m");
+
+                var biome = TerrainGenerator.GetBiomeAt(playerTransform.position.x, playerTransform.position.z, 12345);
+                GUILayout.Label($"Biome: {biome}");
+
+                var weights = TerrainGenerator.GetBiomeWeights(playerTransform.position.x, playerTransform.position.z, 12345);
+                GUILayout.Label($"S:{weights.r:F1} G:{weights.g:F1} R:{weights.b:F1} Sn:{weights.a:F1}");
+            }
+
+            GUILayout.EndVertical();
+        }
+
+        #region Network Methods
+
+        private async void InitializeNetworkServices()
+        {
+            var bridge = SessionGameBridge.Instance;
+            if (bridge == null)
+            {
+                networkStatus = "SessionGameBridge not found";
+                return;
+            }
+
+            networkStatus = "Initializing...";
+            await bridge.InitializeServices();
+
+            if (bridge.IsInitialized)
+            {
+                servicesInitialized = true;
+                networkStatus = "Ready";
+            }
+            else
+            {
+                networkStatus = "Init failed";
+            }
+        }
+
+        private async void CreateNetworkSession()
+        {
+            var bridge = SessionGameBridge.Instance;
+            if (bridge == null) return;
+
+            networkStatus = "Creating...";
+            var code = await bridge.CreateSession();
+
+            networkStatus = !string.IsNullOrEmpty(code) ? $"Code: {code}" : "Create failed";
+        }
+
+        private async void JoinNetworkSession()
+        {
+            if (string.IsNullOrEmpty(joinCode))
+            {
+                networkStatus = "Enter code first";
+                return;
+            }
+
+            var bridge = SessionGameBridge.Instance;
+            if (bridge == null) return;
+
+            networkStatus = $"Joining {joinCode}...";
+            var success = await bridge.JoinSession(joinCode.Trim().ToUpper());
+            networkStatus = success ? "Joined!" : "Join failed";
+        }
+
+        private async void DisconnectNetwork()
+        {
+            var bridge = SessionGameBridge.Instance;
+            if (bridge != null && bridge.IsInSession)
+            {
+                await bridge.LeaveSession();
+            }
+            else
+            {
+                NetworkManager.Singleton?.Shutdown();
+            }
+            networkStatus = "Disconnected";
+        }
+
+        #endregion
 
         private void DrawNoclipHUD()
         {

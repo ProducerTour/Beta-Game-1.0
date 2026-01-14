@@ -5,213 +5,201 @@ namespace CreatorWorld.Network
 {
     /// <summary>
     /// Simple UI for testing multiplayer connections.
-    /// Supports both local testing and Unity Relay for remote testing.
     /// </summary>
     public class NetworkTestUI : MonoBehaviour
     {
         private string joinCode = "";
-        private string statusMessage = "";
-        private bool showRelayOptions = false;
-
-        private void Start()
-        {
-            // Subscribe to SessionGameBridge events if available
-            if (SessionGameBridge.Instance != null)
-            {
-                SessionGameBridge.Instance.OnSessionCreated += code =>
-                {
-                    statusMessage = $"Session created! Code: {code}";
-                };
-                SessionGameBridge.Instance.OnSessionJoined += () =>
-                {
-                    statusMessage = "Joined session!";
-                };
-                SessionGameBridge.Instance.OnError += error =>
-                {
-                    statusMessage = $"Error: {error}";
-                };
-            }
-        }
+        private string statusMessage = "Not connected";
+        private bool servicesInitialized = false;
 
         private void OnGUI()
         {
-            GUILayout.BeginArea(new Rect(10, 10, 350, 450));
+            // Make text bigger and easier to read
+            GUI.skin.label.fontSize = 16;
+            GUI.skin.button.fontSize = 16;
+            GUI.skin.textField.fontSize = 16;
+            GUI.skin.box.fontSize = 16;
+
+            GUILayout.BeginArea(new Rect(10, 10, 400, 500));
 
             if (NetworkManager.Singleton == null)
             {
-                GUILayout.Label("NetworkManager not found!", GUI.skin.box);
+                GUILayout.Label("ERROR: NetworkManager not found!", GUI.skin.box);
                 GUILayout.EndArea();
                 return;
             }
 
             if (!NetworkManager.Singleton.IsClient && !NetworkManager.Singleton.IsServer)
             {
-                DrawConnectionMenu();
+                DrawMainMenu();
             }
             else
             {
                 DrawConnectedStatus();
             }
 
-            // Status message
-            if (!string.IsNullOrEmpty(statusMessage))
-            {
-                GUILayout.Space(10);
-                GUILayout.Label(statusMessage, GUI.skin.box);
-            }
-
             GUILayout.EndArea();
         }
 
-        private void DrawConnectionMenu()
+        private void DrawMainMenu()
         {
-            GUILayout.Label("MULTIPLAYER TEST", GUI.skin.box);
-            GUILayout.Space(5);
-
-            // Toggle between local and relay
-            showRelayOptions = GUILayout.Toggle(showRelayOptions, "Use Unity Relay (for remote friends)");
+            GUILayout.Label("=== MULTIPLAYER TEST ===", GUI.skin.box);
             GUILayout.Space(10);
 
-            if (showRelayOptions)
+            // Status
+            GUILayout.Label($"Status: {statusMessage}");
+            GUILayout.Space(10);
+
+            // Step 1: Initialize
+            GUILayout.Label("STEP 1: Initialize Services");
+            if (GUILayout.Button(servicesInitialized ? "Services Ready ✓" : "Initialize Services", GUILayout.Height(50)))
             {
-                DrawRelayOptions();
+                InitializeServices();
+            }
+            GUILayout.Space(20);
+
+            // Step 2: Host or Join
+            if (servicesInitialized)
+            {
+                GUILayout.Label("STEP 2: Host or Join");
+
+                if (GUILayout.Button("CREATE SESSION (You are Host)", GUILayout.Height(50)))
+                {
+                    CreateSession();
+                }
+
+                GUILayout.Space(10);
+                GUILayout.Label("- OR -");
+                GUILayout.Space(10);
+
+                GUILayout.Label("Enter friend's join code:");
+                joinCode = GUILayout.TextField(joinCode, GUILayout.Height(40));
+
+                if (GUILayout.Button("JOIN SESSION (Connect to friend)", GUILayout.Height(50)))
+                {
+                    JoinSession();
+                }
             }
             else
             {
-                DrawLocalOptions();
+                GUILayout.Label("(Initialize services first)");
             }
-        }
 
-        private void DrawLocalOptions()
-        {
-            GUILayout.Label("LOCAL TESTING (Same Network)", GUI.skin.box);
-            GUILayout.Space(5);
-
-            if (GUILayout.Button("Host (Server + Client)", GUILayout.Height(40)))
+            GUILayout.Space(20);
+            GUILayout.Label("--- LOCAL TESTING ---");
+            if (GUILayout.Button("Host (Local Only)", GUILayout.Height(40)))
             {
-                statusMessage = "Starting host...";
                 NetworkManager.Singleton.StartHost();
-                statusMessage = "Host started!";
-            }
-
-            if (GUILayout.Button("Server Only", GUILayout.Height(40)))
-            {
-                statusMessage = "Starting server...";
-                NetworkManager.Singleton.StartServer();
-                statusMessage = "Server started!";
-            }
-
-            if (GUILayout.Button("Client (Connect to localhost)", GUILayout.Height(40)))
-            {
-                statusMessage = "Connecting to localhost...";
-                NetworkManager.Singleton.StartClient();
-            }
-        }
-
-        private void DrawRelayOptions()
-        {
-            GUILayout.Label("RELAY (Different Networks)", GUI.skin.box);
-            GUILayout.Space(5);
-
-            var bridge = SessionGameBridge.Instance;
-
-            if (bridge == null)
-            {
-                GUILayout.Label("SessionGameBridge not found!");
-                GUILayout.Label("Add it to your scene.");
-                return;
-            }
-
-            // Show initialization status
-            if (!bridge.IsInitialized)
-            {
-                GUILayout.Label("Unity Services: Not initialized");
-                if (GUILayout.Button("Initialize Services", GUILayout.Height(40)))
-                {
-                    _ = bridge.InitializeServices();
-                    statusMessage = "Initializing...";
-                }
-                return;
-            }
-
-            GUILayout.Label("Unity Services: Ready", GUI.skin.box);
-            GUILayout.Space(5);
-
-            // Create Session
-            if (GUILayout.Button("Create Session (Host)", GUILayout.Height(40)))
-            {
-                statusMessage = "Creating session...";
-                _ = bridge.CreateSession();
-            }
-
-            GUILayout.Space(10);
-
-            // Join Session
-            GUILayout.Label("Join with Code:");
-            joinCode = GUILayout.TextField(joinCode, GUILayout.Height(30));
-
-            if (GUILayout.Button("Join Session", GUILayout.Height(40)))
-            {
-                if (string.IsNullOrEmpty(joinCode))
-                {
-                    statusMessage = "Enter a join code!";
-                }
-                else
-                {
-                    statusMessage = $"Joining {joinCode}...";
-                    _ = bridge.JoinSession(joinCode);
-                }
-            }
-
-            GUILayout.Space(10);
-
-            // Quick Join
-            if (GUILayout.Button("Quick Join (Auto-match)", GUILayout.Height(40)))
-            {
-                statusMessage = "Quick joining...";
-                _ = bridge.QuickJoin();
+                statusMessage = "Running as local host";
             }
         }
 
         private void DrawConnectedStatus()
         {
-            string mode = NetworkManager.Singleton.IsHost ? "Host" :
-                          NetworkManager.Singleton.IsServer ? "Server" : "Client";
+            string mode = NetworkManager.Singleton.IsHost ? "HOST" :
+                          NetworkManager.Singleton.IsServer ? "SERVER" : "CLIENT";
 
-            GUILayout.Label($"CONNECTED AS: {mode}", GUI.skin.box);
-            GUILayout.Space(5);
+            GUILayout.Label($"=== CONNECTED AS {mode} ===", GUI.skin.box);
+            GUILayout.Space(10);
 
-            GUILayout.Label($"Connected clients: {NetworkManager.Singleton.ConnectedClientsIds.Count}");
+            GUILayout.Label($"Connected players: {NetworkManager.Singleton.ConnectedClientsIds.Count}");
+            GUILayout.Label($"My Client ID: {NetworkManager.Singleton.LocalClientId}");
 
-            if (NetworkManager.Singleton.LocalClient != null)
-            {
-                GUILayout.Label($"My Client ID: {NetworkManager.Singleton.LocalClientId}");
-            }
-
-            // Show join code if we have one
+            // Show join code if available
             var bridge = SessionGameBridge.Instance;
             if (bridge != null && !string.IsNullOrEmpty(bridge.CurrentSessionCode))
             {
                 GUILayout.Space(10);
-                GUILayout.Label("JOIN CODE:", GUI.skin.box);
-                GUILayout.TextField(bridge.CurrentSessionCode, GUILayout.Height(30));
-                GUILayout.Label("(Share this with friends!)");
+                GUILayout.Label("=== JOIN CODE ===", GUI.skin.box);
+                GUILayout.TextField(bridge.CurrentSessionCode, GUILayout.Height(40));
+                GUILayout.Label("Share this code with your friend!");
             }
 
-            GUILayout.Space(10);
+            GUILayout.Space(20);
 
-            if (GUILayout.Button("Disconnect", GUILayout.Height(40)))
+            if (GUILayout.Button("DISCONNECT", GUILayout.Height(50)))
             {
-                if (bridge != null && bridge.IsInSession)
-                {
-                    _ = bridge.LeaveSession();
-                }
-                else
-                {
-                    NetworkManager.Singleton.Shutdown();
-                }
-                statusMessage = "Disconnected";
+                Disconnect();
             }
+        }
+
+        private async void InitializeServices()
+        {
+            var bridge = SessionGameBridge.Instance;
+            if (bridge == null)
+            {
+                statusMessage = "ERROR: Add SessionGameBridge to scene!";
+                return;
+            }
+
+            statusMessage = "Initializing...";
+            await bridge.InitializeServices();
+
+            if (bridge.IsInitialized)
+            {
+                servicesInitialized = true;
+                statusMessage = "Services ready! Create or join a session.";
+            }
+            else
+            {
+                statusMessage = "Failed to initialize. Check console.";
+            }
+        }
+
+        private async void CreateSession()
+        {
+            var bridge = SessionGameBridge.Instance;
+            if (bridge == null) return;
+
+            statusMessage = "Creating session...";
+            var code = await bridge.CreateSession();
+
+            if (!string.IsNullOrEmpty(code))
+            {
+                statusMessage = $"Session created! Code: {code}";
+            }
+            else
+            {
+                statusMessage = "Failed to create session. Check console.";
+            }
+        }
+
+        private async void JoinSession()
+        {
+            if (string.IsNullOrEmpty(joinCode))
+            {
+                statusMessage = "Enter a join code first!";
+                return;
+            }
+
+            var bridge = SessionGameBridge.Instance;
+            if (bridge == null) return;
+
+            statusMessage = $"Joining {joinCode}...";
+            var success = await bridge.JoinSession(joinCode.Trim().ToUpper());
+
+            if (success)
+            {
+                statusMessage = "Joined successfully!";
+            }
+            else
+            {
+                statusMessage = "Failed to join. Check code and try again.";
+            }
+        }
+
+        private async void Disconnect()
+        {
+            var bridge = SessionGameBridge.Instance;
+            if (bridge != null && bridge.IsInSession)
+            {
+                await bridge.LeaveSession();
+            }
+            else
+            {
+                NetworkManager.Singleton.Shutdown();
+            }
+            statusMessage = "Disconnected";
         }
     }
 }
